@@ -216,11 +216,7 @@ function authorize() {
         env.GITHUB_REF !== `refs/heads/${env.REVIEW_DEFAULT_BRANCH || 'main'}`
     )
         return;
-    const request = reviewRequest(
-        env.GITHUB_EVENT_NAME,
-        event,
-        env.AUTO_ENABLED === 'true' || settings().autoReview,
-    );
+    const request = reviewRequest(env.GITHUB_EVENT_NAME, event, true);
     if (!request) return;
     if (request.manual) {
         if (!actorName.test(env.GITHUB_ACTOR ?? '')) return;
@@ -233,7 +229,8 @@ function authorize() {
     env.BASE_SHA = pull.base?.sha;
     env.HEAD_SHA = pull.head?.sha;
     env.PR_NUMBER = String(request.number);
-    if (env.GITHUB_WORKFLOW_SHA) configuration = undefined;
+    configuration = undefined;
+    if (!request.manual && env.AUTO_ENABLED !== 'true' && !settings().autoReview) return;
     const revision = pullRevision(pull, env.GITHUB_REPOSITORY, settings().baseBranches);
     if (!revision) {
         if (request.manual)
@@ -550,7 +547,9 @@ function redactReviewSecrets(text) {
 function showFailure(log) {
     const lines = stripVTControlCharacters(log)
         .split('\n')
-        .filter((line) => /\| (?:ERROR|CRITICAL)\s+\| |^docker: /.test(line))
+        .filter((line) =>
+            /\| (?:ERROR|CRITICAL)\s+\| |^docker: |^[\w.]+(?:Error|Exception|Timeout):/.test(line),
+        )
         .slice(-3);
     for (const line of lines)
         console.error(`Review runtime: ${redactReviewSecrets(line).slice(0, 600)}`);

@@ -164,6 +164,11 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     console.log(JSON.stringify({type:'step_finish',part:{reason:'stop',messageID:'end'}}));
 } else {
     fs.appendFileSync('provider-calls', 'pr-agent\\n');
+    if (process.env.FIXTURE_COMMAND_EXCEPTION) {
+        console.error('2026-11-14 | ERROR | pr_agent.agent.pr_agent:_handle_request:369 - Failed to process the command.');
+        console.error('ValueError: Native setup rejected fixture-go-key');
+        process.exit(1);
+    }
     const failure = process.env.FIXTURE_SYNTHESIS_ERROR;
     if (failure && !(process.env.OPENROUTER__KEY && process.env.FIXTURE_FALLBACK_SUCCESS)) {
         console.error('2026-11-08 | ERROR | pr_agent.tools.pr_reviewer:run:502 - Failed to review PR: Attempts: openai/deepseek-v4.1-flash: ' + failure);
@@ -702,8 +707,9 @@ await test('provider failures can switch routes while auth, invalid outputs and 
 });
 
 await test('the command entrypoint acknowledges eligible comments before allowing analysis and rejects stale publication', (t) => {
-    const fixture = mkdtempSync(join(tmpdir(), 'reviewrelay-review-policy-'));
-    t.after(() => rmSync(fixture, { recursive: true, force: true }));
+    const { fixture, baseSha, expectedPull } = reviewFixture(t);
+    const base = baseSha;
+    const pull = expectedPull;
     const commandPath = fileURLToPath(new URL('../../bin/pr-review.mjs', import.meta.url));
     const output = join(fixture, 'output');
     const eventPath = join(fixture, 'event');
@@ -743,21 +749,22 @@ else console.log(process.env.FIXTURE_PULL);
         GITHUB_STEP_SUMMARY: summary,
         GITHUB_ACTOR: 'member',
         GITHUB_REPOSITORY: repo,
-        GITHUB_WORKFLOW_SHA: '',
+        GITHUB_WORKFLOW_SHA: baseSha,
         GITHUB_REF: '',
-        BASE_SHA: '',
+        BASE_SHA: baseSha,
         HEAD_SHA: '',
         FIXTURE_CALLS: calls,
         FIXTURE_PERMISSION: 'read',
         FIXTURE_PULL: JSON.stringify(pull),
     };
-    const denied = spawnSync(process.execPath, [commandPath, 'authorize'], { env });
+    const denied = spawnSync(process.execPath, [commandPath, 'authorize'], { cwd: fixture, env });
     assert.equal(denied.status, 0);
     assert.equal(readFileSync(output, 'utf8'), '');
     assert.equal(readFileSync(calls, 'utf8'), `repos/${repo}/collaborators/member/permission\n`);
 
     writeFileSync(calls, '');
     const ineligible = spawnSync(process.execPath, [commandPath, 'authorize'], {
+        cwd: fixture,
         env: {
             ...env,
             FIXTURE_PERMISSION: 'write',
@@ -782,6 +789,7 @@ else console.log(process.env.FIXTURE_PULL);
             JSON.stringify({ ...comment, comment: { id: 123, body: `/${command}\r\n` } }),
         );
         const authorized = spawnSync(process.execPath, [commandPath, 'authorize'], {
+            cwd: fixture,
             env: { ...env, FIXTURE_PERMISSION: 'write' },
             encoding: 'utf8',
         });
@@ -801,6 +809,7 @@ else console.log(process.env.FIXTURE_PULL);
 
     writeFileSync(output, '');
     const failedReaction = spawnSync(process.execPath, [commandPath, 'authorize'], {
+        cwd: fixture,
         env: { ...env, FIXTURE_PERMISSION: 'write', FIXTURE_REACTION_FAIL: 'true' },
         encoding: 'utf8',
     });
@@ -812,6 +821,7 @@ else console.log(process.env.FIXTURE_PULL);
     writeFileSync(calls, '');
     writeFileSync(eventPath, JSON.stringify({ inputs: { pull_request: '42' } }));
     const dispatched = spawnSync(process.execPath, [commandPath, 'authorize'], {
+        cwd: fixture,
         env: { ...env, GITHUB_EVENT_NAME: 'workflow_dispatch', FIXTURE_PERMISSION: 'write' },
     });
     assert.equal(dispatched.status, 0);
@@ -823,6 +833,7 @@ else console.log(process.env.FIXTURE_PULL);
 
     writeFileSync(calls, '');
     const stale = spawnSync(process.execPath, [commandPath, 'publish'], {
+        cwd: fixture,
         env: {
             ...env,
             PR_NUMBER: '42',
@@ -1370,4 +1381,32 @@ await test('fallback synthesis retains its native presentation settings during f
     });
     assert.equal(synthesis.status, 0, synthesis.stderr);
     assert.equal(JSON.parse(read('render-env')).CONFIG__RESPONSE_LANGUAGE, 'fr-FR');
+});
+
+await test('native command failures expose the terminal exception while redacting provider credentials', (t) => {
+    const { run, outputs } = reviewFixture(t);
+    assert.equal(run('analyze').status, 0);
+    const result = run('synthesize', {
+        OPENCODE_REPORT_DIR: outputs().reports,
+        FIXTURE_COMMAND_EXCEPTION: 'true',
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /ValueError: Native setup rejected \[redacted\]/);
+    assert.ok(!result.stderr.includes('fixture-go-key'));
+});
+
+await test('manual authorization reads native configuration from the frozen PR base rather than the dispatcher revision', (t) => {
+    const { run, outputs, write, git, baseSha } = reviewFixture(t, {
+        files: { '.pr_agent.toml': '[config]\nrepo_context_from_default_branch = false\n' },
+    });
+    write('.pr_agent.toml', '[config]\nrepo_context_from_default_branch = true\n');
+    git('add', '.pr_agent.toml');
+    git('commit', '-qm', 'Independent dispatcher revision');
+    const result = run('authorize', {
+        BASE_SHA: '',
+        HEAD_SHA: '',
+        GITHUB_WORKFLOW_SHA: git('rev-parse', 'HEAD'),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(outputs().request).base, baseSha);
 });
