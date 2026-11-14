@@ -1,0 +1,167 @@
+name: ReviewRelay
+on:
+    workflow_call:
+        inputs:
+            config-path:
+                type: string
+                default: .reviewrelay.json
+            overrides:
+                type: string
+                default: '{}'
+        secrets:
+            provider-env:
+                required: false
+        outputs:
+            publication-url:
+                value: ${{ jobs.publish.outputs.url }}
+permissions: {}
+jobs:
+    request:
+        if: >-
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'pull_request_target' && !github.event.pull_request.draft) ||
+            (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+            github.event.sender.type == 'User' &&
+            (startsWith(github.event.comment.body, '/review') || startsWith(github.event.comment.body, '/improve')))
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            checks: write
+            pull-requests: write
+        outputs:
+            allowed: ${{ steps.request.outputs.allowed }}
+            command: ${{ steps.request.outputs.command }}
+            request: ${{ steps.request.outputs.request }}
+        steps:
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: '24'
+            - uses: $/action
+              id: request
+              with:
+                  operation: authorize
+                  config-path: ${{ inputs.config-path }}
+                  overrides: ${{ inputs.overrides }}
+                  provider-env: ${{ secrets.provider-env || '{}' }}
+    analyze:
+        needs: request
+        if: needs.request.outputs.allowed == 'true' && needs.request.outputs.command == 'review'
+        concurrency: &reviewrelay-concurrency
+            group: reviewrelay-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pull_request || github.run_id }}
+            cancel-in-progress: true
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            actions: read
+            checks: write
+            pull-requests: read
+        outputs:
+            artifact-id: ${{ steps.analysis.outputs.artifact-id }}
+            skipped: ${{ steps.analysis.outputs.skipped }}
+        steps:
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: '24'
+            - uses: $/action
+              id: analysis
+              with:
+                  operation: analyze
+                  request: ${{ needs.request.outputs.request }}
+                  config-path: ${{ inputs.config-path }}
+                  overrides: ${{ inputs.overrides }}
+                  provider-env: ${{ secrets.provider-env || '{}' }}
+    synthesize:
+        needs: [request, analyze]
+        if: needs.analyze.outputs.skipped != 'true'
+        concurrency: *reviewrelay-concurrency
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            actions: read
+            checks: write
+            pull-requests: read
+        outputs:
+            artifact-id: ${{ steps.synthesis.outputs.artifact-id }}
+            state: ${{ steps.synthesis.outputs.state }}
+        steps:
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: '24'
+            - uses: $/action
+              id: synthesis
+              with:
+                  operation: synthesize
+                  request: ${{ needs.request.outputs.request }}
+                  artifact-id: ${{ needs.analyze.outputs.artifact-id }}
+                  config-path: ${{ inputs.config-path }}
+                  overrides: ${{ inputs.overrides }}
+                  provider-env: ${{ secrets.provider-env || '{}' }}
+    improve:
+        needs: request
+        if: needs.request.outputs.allowed == 'true' && needs.request.outputs.command == 'improve'
+        concurrency: *reviewrelay-concurrency
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            pull-requests: read
+        outputs:
+            artifact-id: ${{ steps.suggestions.outputs.artifact-id }}
+        steps:
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: '24'
+            - uses: $/action
+              id: suggestions
+              with:
+                  operation: improve
+                  request: ${{ needs.request.outputs.request }}
+                  config-path: ${{ inputs.config-path }}
+                  overrides: ${{ inputs.overrides }}
+                  provider-env: ${{ secrets.provider-env || '{}' }}
+    publish:
+        needs: [request, synthesize, improve]
+        if: >-
+            always() && needs.request.outputs.allowed == 'true' &&
+            (needs.synthesize.result == 'success' || needs.improve.result == 'success')
+        concurrency: *reviewrelay-concurrency
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            actions: read
+            checks: write
+            pull-requests: write
+        outputs:
+            url: ${{ steps.publish.outputs.publication-url }}
+        steps:
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: '24'
+            - uses: $/action
+              id: publish
+              with:
+                  operation: publish
+                  request: ${{ needs.request.outputs.request }}
+                  artifact-id: ${{ needs.synthesize.outputs.artifact-id || needs.improve.outputs.artifact-id }}
+                  config-path: ${{ inputs.config-path }}
+                  overrides: ${{ inputs.overrides }}
+    finish:
+        needs: [request, analyze, synthesize, improve, publish]
+        if: always() && needs.request.outputs.allowed == 'true'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            checks: write
+        steps:
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version: '24'
+            - uses: $/action
+              with:
+                  operation: finish
+                  request: ${{ needs.request.outputs.request }}
+                  config-path: ${{ inputs.config-path }}
+                  overrides: ${{ inputs.overrides }}
+                  results: >-
+                      {"analyze":"${{ needs.analyze.result }}","synthesize":"${{ needs.synthesize.result }}",
+                      "improve":"${{ needs.improve.result }}","publish":"${{ needs.publish.result }}",
+                      "skipped":"${{ needs.analyze.outputs.skipped }}","state":"${{ needs.synthesize.outputs.state }}"}

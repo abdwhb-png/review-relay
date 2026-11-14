@@ -1,0 +1,31 @@
+name: PR review
+on:
+    pull_request_target:
+        types: [opened, reopened, ready_for_review, synchronize]
+    issue_comment:
+        types: [created]
+    workflow_dispatch:
+        inputs:
+            pull_request:
+                description: Pull request number
+                type: string
+                required: true
+permissions: {}
+jobs:
+    review:
+        permissions:
+            contents: read
+            actions: read
+            checks: write
+            pull-requests: write
+        uses: abdwhb-png/review-relay/.github/workflows/review.yml@REVIEWRELAY_SHA
+        secrets:
+            provider-env: |
+                {
+                  "opencode": {"OPENCODE_API_KEY": ${{ toJSON(secrets.OPENCODE_GO_API_KEY) }}},
+                  "pr-agent": {"OPENAI__KEY": ${{ toJSON(secrets.OPENCODE_GO_API_KEY) }}},
+                  "fallback": {
+                    "opencode": {"OPENROUTER_API_KEY": ${{ toJSON(secrets.OPENROUTER_API_KEY) }}},
+                    "pr-agent": {"OPENROUTER__KEY": ${{ toJSON(secrets.OPENROUTER_API_KEY) }}}
+                  }
+                }

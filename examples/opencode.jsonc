@@ -1,0 +1,14 @@
+{
+    // Native OpenCode configuration; ReviewRelay does not rename these fields.
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "provider": {
+        "opencode-go": {
+            "models": {
+                "deepseek-v4.1-flash": {
+                    "options": { "reasoningEffort": "medium" },
+                },
+            },
+        },
+    },
+    "instructions": ["CLAUDE.md"],
+}

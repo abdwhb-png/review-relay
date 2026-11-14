@@ -1,0 +1,29 @@
+[config]
+model = "openai/deepseek-v4.1-flash"
+custom_model_max_tokens = 1000000
+max_model_tokens = 0
+max_output_tokens = 384000
+additional_reasoning_effort_models = ["deepseek-v4.1-flash"]
+num_retries = 0
+ai_timeout = 240
+retry_same_model_on_timeout = false
+output_run_details = true
+reasoning_effort = "high"
+response_language = "en-US"
+
+[pr_reviewer]
+require_estimate_effort_to_review = false
+enable_review_labels_effort = false
+enable_review_labels_security = false
+
+[pr_code_suggestions]
+committable_code_suggestions = true
+
+[openai]
+api_base = "https://opencode.ai/inference/go/openai/v1"
+
+[litellm]
+custom_llm_provider = "openai"
+force_streaming_custom_llm_provider = "openai"
+force_streaming_api_base_substrings = ["https://opencode.ai/inference/go/openai/v1"]
+extra_headers = '{"User-Agent":"ReviewRelay-PR-Agent/1.0"}'

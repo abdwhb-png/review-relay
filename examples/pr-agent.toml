@@ -1,0 +1,9 @@
+[config]
+reasoning_effort = "medium"
+ai_timeout = 300
+response_language = "en-GB"
+repo_context_files = ["CLAUDE.md"]
+repo_context_from_default_branch = false
+
+[pr_code_suggestions]
+committable_code_suggestions = true

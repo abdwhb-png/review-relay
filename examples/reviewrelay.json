@@ -1,0 +1,7 @@
+{
+    "schemaVersion": 1,
+    "autoReview": false,
+    "manualFallback": false,
+    "instructionSources": ["CLAUDE.md", "guidance/*.md"],
+    "retentionDays": 7
+}
