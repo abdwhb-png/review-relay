@@ -15,9 +15,6 @@ on:
             publication-url:
                 value: ${{ jobs.publish.outputs.url }}
 permissions: {}
-concurrency:
-    group: reviewrelay-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pull_request || github.run_id }}
-    cancel-in-progress: true
 jobs:
     request:
         if: >-
@@ -49,6 +46,9 @@ jobs:
     analyze:
         needs: request
         if: needs.request.outputs.allowed == 'true' && needs.request.outputs.command == 'review'
+        concurrency: &reviewrelay-concurrency
+            group: reviewrelay-${{ github.repository }}-${{ fromJSON(needs.request.outputs.request || '{"number":0}').number }}
+            cancel-in-progress: true
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -73,6 +73,7 @@ jobs:
     synthesize:
         needs: [request, analyze]
         if: needs.analyze.outputs.skipped != 'true'
+        concurrency: *reviewrelay-concurrency
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -98,6 +99,7 @@ jobs:
     improve:
         needs: request
         if: needs.request.outputs.allowed == 'true' && needs.request.outputs.command == 'improve'
+        concurrency: *reviewrelay-concurrency
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -121,6 +123,7 @@ jobs:
         if: >-
             always() && needs.request.outputs.allowed == 'true' &&
             (needs.synthesize.result == 'success' || needs.improve.result == 'success')
+        concurrency: *reviewrelay-concurrency
         runs-on: ubuntu-latest
         permissions:
             contents: read
