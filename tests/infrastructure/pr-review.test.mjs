@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { pullRevision } from '../../bin/github-actions.mjs';
+import { credentialName } from '../../bin/configuration.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -31,6 +32,13 @@ const manual = {
     sender: { type: 'User' },
 };
 const automatic = { action: 'synchronize', number: 42, pull_request: pull };
+
+await test('native credential names cover HTTP headers while keeping token budgets significant', () => {
+    for (const key of ['X-Api-Key', 'Proxy-Authorization', 'OPENAI__KEY', 'AWS_ACCESS_KEY_ID'])
+        assert.equal(credentialName(key), true, key);
+    for (const key of ['CONFIG__MAX_OUTPUT_TOKENS', 'max-tokens', 'reasoningEffort'])
+        assert.equal(credentialName(key), false, key);
+});
 
 function reviewFixture(
     t,
@@ -989,6 +997,8 @@ await test('native invocation settings reach the runtime without hidden model, t
         { opencode: { NODE_OPTIONS: '--import=evil' } },
         { 'pr-agent': { GITHUB__USER_TOKEN: 'other' } },
         { 'pr-agent': { CONFIG__PUBLISH_OUTPUT: 'true' } },
+        { 'pr-agent': { DOCKER_HOST: 'tcp://127.0.0.1:2375' } },
+        { opencode: { DOCKER_CONFIG: '/caller-config' } },
     ]) {
         const failed = run('analyze', { REVIEW_PROVIDER_ENV: JSON.stringify(unsafe) });
         assert.equal(failed.status, 1);
@@ -1189,12 +1199,26 @@ await test('native provider credentials are redacted from retained reports and s
 });
 
 await test('automatic bot requests preserve the distinction between reviewed head and trusted workflow source', (t) => {
-    const { run, outputs, fixture, write, expectedPull } = reviewFixture(t);
+    const { run, outputs, fixture, write, git, expectedPull } = reviewFixture(t, {
+        branch: 'release',
+        files: {
+            '.reviewrelay.json': JSON.stringify({ autoReview: true, baseBranches: ['release'] }),
+        },
+    });
+    write('dispatcher.txt', 'Trusted default-branch workflow revision');
+    git('add', 'dispatcher.txt');
+    git('commit', '-qm', 'Independent default-branch workflow');
+    const workflow = {
+        GITHUB_WORKFLOW_SHA: git('rev-parse', 'HEAD'),
+        GITHUB_WORKFLOW_REF: 'example/project/.github/workflows/custom.yml@refs/heads/main',
+        REVIEW_DEFAULT_BRANCH: 'main',
+    };
     write(
         'event.json',
         JSON.stringify({ action: 'synchronize', number: 42, pull_request: expectedPull }),
     );
     const auth = run('authorize', {
+        ...workflow,
         FIXTURE_ACTION: 'true',
         GITHUB_EVENT_NAME: 'pull_request_target',
         GITHUB_EVENT_PATH: join(fixture, 'event.json'),
@@ -1205,6 +1229,7 @@ await test('automatic bot requests preserve the distinction between reviewed hea
     const request = outputs().request;
     assert.ok(request);
     const env = {
+        ...workflow,
         FIXTURE_ACTION: 'true',
         REVIEW_REQUEST: request,
         GITHUB_EVENT_NAME: 'pull_request_target',
@@ -1212,13 +1237,65 @@ await test('automatic bot requests preserve the distinction between reviewed hea
     };
     const analysis = run('analyze', env);
     assert.equal(analysis.status, 0, analysis.stderr);
+    const archive = outputs().reports;
     const result = run('synthesize', {
         ...env,
         REVIEW_ARTIFACT_ID: '70',
-        FIXTURE_ARCHIVE_DIR: outputs().reports,
+        FIXTURE_ARCHIVE_DIR: archive,
         FIXTURE_SOURCE_EVENT: 'pull_request_target',
     });
     assert.equal(result.status, 0, result.stderr);
+    const manifestPath = join(archive, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    writeFileSync(
+        manifestPath,
+        JSON.stringify({
+            ...manifest,
+            producer: { ...manifest.producer, workflowSha: expectedPull.base.sha },
+        }),
+    );
+    const calls = readFileSync(join(fixture, 'provider-calls'), 'utf8');
+    const mismatched = run('synthesize', {
+        ...env,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: archive,
+        FIXTURE_SOURCE_EVENT: 'pull_request_target',
+    });
+    assert.equal(mismatched.status, 1);
+    assert.equal(readFileSync(join(fixture, 'provider-calls'), 'utf8'), calls);
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+
+    write('dispatcher.txt', 'Later trusted default-branch revision');
+    git('add', 'dispatcher.txt');
+    git('commit', '-qm', 'Advance the trusted default branch');
+    const historical = {
+        ...env,
+        GITHUB_RUN_ID: '901',
+        GITHUB_WORKFLOW_SHA: git('rev-parse', 'HEAD'),
+    };
+    assert.equal(run('authorize', historical).status, 0);
+    const resumed = run('synthesize', {
+        ...historical,
+        REVIEW_REQUEST: outputs().request,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: archive,
+        FIXTURE_SOURCE_EVENT: 'pull_request_target',
+    });
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const unrelated = {
+        ...historical,
+        GITHUB_RUN_ID: '902',
+        GITHUB_WORKFLOW_SHA: expectedPull.base.sha,
+    };
+    assert.equal(run('authorize', unrelated).status, 0);
+    const untrusted = run('synthesize', {
+        ...unrelated,
+        REVIEW_REQUEST: outputs().request,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: archive,
+        FIXTURE_SOURCE_EVENT: 'pull_request_target',
+    });
+    assert.equal(untrusted.status, 1);
 });
 
 await test('publication retries reuse the confirmed review and native reference without repeating inference', (t) => {
@@ -1355,6 +1432,11 @@ await test('a custom native configuration directory cannot bypass the executable
     });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /extensions/);
+    const aliased = run('analyze', {
+        REVIEW_PROVIDER_ENV: JSON.stringify({ opencode: { OPENCODE_CONFIG_DIR: '.custom/' } }),
+    });
+    assert.equal(aliased.status, 1);
+    assert.match(aliased.stderr, /repository-relative/);
 });
 
 await test('fallback synthesis retains its native presentation settings during final rendering', (t) => {

@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { matchesGlob } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 const defaults = {
     schemaVersion: 1,
@@ -11,9 +12,24 @@ const defaults = {
     instructionSources: [],
 };
 
+export function openCodeDefaults(provider = 'primary') {
+    if (!['primary', 'fallback'].includes(provider)) throw new Error('Unknown native profile.');
+    const primary = JSON.parse(
+        readFileSync(new URL('../profiles/primary.json', import.meta.url), 'utf8'),
+    );
+    return provider === 'primary'
+        ? primary
+        : {
+              ...primary,
+              ...JSON.parse(
+                  readFileSync(new URL('../profiles/fallback.json', import.meta.url), 'utf8'),
+              ),
+          };
+}
+
 export function credentialName(key) {
     return (
-        /(?:^|_)(?:key|access_key_id|token|secret|password|authorization|credentials|auth)$/i.test(
+        /(?:^|[_-])(?:key|access_key_id|token|secret|password|authorization|credentials|auth)$/i.test(
             key,
         ) || /^(?:apiKey|accessToken|authToken|clientSecret)$/i.test(key)
     );
@@ -46,7 +62,7 @@ export function repositoryPath(value) {
         typeof value === 'string' &&
         value.length > 0 &&
         !value.startsWith('/') &&
-        !value.split('/').some((part) => part === '..' || part === '.') &&
+        !value.split('/').some((part) => !part || part === '..' || part === '.') &&
         !/[\0\r\n\\]/.test(value)
     );
 }
@@ -190,6 +206,9 @@ function nativeEnvironment(value, allowFallback = true) {
                 text.includes('\0') ||
                 !/^[A-Z][A-Z0-9_]*$/.test(key) ||
                 /^(?:PATH$|HOME$|ENV$|BASH|SHELL|SHELLOPTS|IFS$|CDPATH$|ZDOTDIR$|LD_|DYLD_|NODE_|BUN_|PYTHON|GIT_|GH_|GITHUB_|RUNNER_|XDG_|REVIEW_|TOOL_)/.test(
+                    key,
+                ) ||
+                /^DOCKER_(?:HOST|CONTEXT|CONFIG|TLS|TLS_VERIFY|CERT_PATH|API_VERSION|AUTH_CONFIG|CUSTOM_HEADERS|CLI_[A-Z0-9_]+|DEFAULT_PLATFORM|CONTENT_TRUST(?:_SERVER)?)$/.test(
                     key,
                 ) ||
                 /^(?:PR_AGENT_CONFIG_BRANCH|CONFIG__(?:PUBLISH_OUTPUT|CONFIG_BRANCH|CLI_MODE|FALLBACK_MODELS|PROPAGATE_TOOL_ERRORS|REPO_CONTEXT_FROM_DEFAULT_BRANCH|GLOBAL_SETTINGS_REPO))$/.test(

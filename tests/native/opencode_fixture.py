@@ -45,17 +45,24 @@ with tempfile.TemporaryDirectory(prefix='native-opencode-') as directory:
     (project / 'CLAUDE.md').write_text('Trusted native CLAUDE instruction sentinel')
     (project / 'policy').mkdir()
     (project / 'policy' / 'rules.md').write_text('Trusted custom glob sentinel')
-    (project / 'opencode.jsonc').write_text('// Native JSONC project configuration\n' + json.dumps({
+    project_config = {
         'instructions': ['CLAUDE.md', 'policy/*.md'],
         'agents': {'review': {'permissions':[{'action':'bash','resource':'*','effect':'allow'}]}},
         'provider': {name: {'options': {'baseURL': f'http://127.0.0.1:{server.server_port}/v1', 'apiKey': 'fixture-key'}} for name in ['opencode-go','openrouter']},
-    }))
-    profile = json.loads(Path('/tool/profiles/primary.json').read_text())
+    }
+    (project / 'opencode.jsonc').write_text('// Native JSONC project configuration\n' + json.dumps(project_config))
+    profile = json.loads(Path('/output/defaults-primary.json').read_text())
 
-    def environment(name):
+    def environment(name, route='primary'):
         state = root / name
+        defaults = state / 'config/opencode'
+        defaults.mkdir(parents=True)
+        selected = json.loads(Path(f'/output/defaults-{route}.json').read_text())
+        (defaults / 'opencode.json').write_text(json.dumps(selected))
+        inline = {'permissions':profile['permissions']}
+        if route == 'fallback': inline['model'] = selected['model']
         env = {'PATH': os.environ['PATH'], 'HOME': str(state), 'OPENCODE_API_KEY': 'fixture-key',
-               'OPENCODE_CONFIG_CONTENT': json.dumps(profile)}
+               'OPENCODE_CONFIG_CONTENT': json.dumps(inline)}
         env.update({'XDG_' + key + '_HOME': str(state / key.lower()) for key in ['CONFIG', 'DATA', 'STATE', 'CACHE']})
         return env
 
@@ -77,20 +84,32 @@ with tempfile.TemporaryDirectory(prefix='native-opencode-') as directory:
     assert text['part']['text'] == 'Native review fixture'
     available={tool['function']['name'] for request in requests for tool in request.get('tools',[])}
     assert 'read' in available, f'The inspection agent has no read tool: {available}'
+    inspection_requests = [request for request in requests if any(tool.get('function',{}).get('name') == 'read' for tool in request.get('tools',[]))]
+    assert inspection_requests[0].get('reasoning_effort') == 'high', 'The configured primary reasoning level did not reach the model request'
     prompt = json.dumps(requests)
     assert 'Trusted native CLAUDE instruction sentinel' in prompt
     assert 'Trusted custom glob sentinel' in prompt
     exported = command(['session', 'export', '--standalone', session], first_env)
     archive = root / 'session.json'
     archive.write_text(exported)
-    next_env = environment('continued')
-    next_env['OPENCODE_CONFIG_CONTENT'] = json.dumps({**profile, **json.loads(Path('/tool/profiles/fallback.json').read_text())})
+    next_env = environment('continued','fallback')
     imported = command(['session', 'import', '--standalone', str(archive), '--directory', str(project)], next_env)
     assert session in imported
     continued = [json.loads(line) for line in command(['run', '--standalone', '--format', 'json', '--session', session, 'Continue with the follow-up'], next_env).splitlines() if line]
     assert not any(event['type'] == 'error' for event in continued), continued
     assert next(event for event in continued if event['type'] == 'text')['sessionID'] == session
-    assert requests[-1]['model'] == 'deepseek/deepseek-v4.1-flash-1017', requests[-1]['model']
-    assert 'Native review fixture' in json.dumps(requests[-1]), 'continuation lost its earlier assistant response'
+    continued_request = next(request for request in reversed(requests) if any(tool.get('function',{}).get('name') == 'read' for tool in request.get('tools',[])))
+    assert continued_request['model'] == 'deepseek/deepseek-v4.1-flash-1017', continued_request['model']
+    assert continued_request.get('reasoning',{}).get('effort') == 'high', 'The configured fallback reasoning level did not reach the model request'
+    assert 'Native review fixture' in json.dumps(continued_request), 'continuation lost its earlier assistant response'
+    archive.write_text(command(['session', 'export', '--standalone', session], next_env))
+    project_config['provider']['opencode-go']['models'] = {'deepseek-v4.1-flash': {'options': {'reasoningEffort': 'medium'}}}
+    (project / 'opencode.jsonc').write_text('// Native project reasoning override\n' + json.dumps(project_config))
+    overridden_env = environment('project-override')
+    command(['session', 'import', '--standalone', str(archive), '--directory', str(project)], overridden_env)
+    command(['run', '--standalone', '--format', 'json', '--session', session, 'Continue using the project configuration'], overridden_env)
+    overridden_request = next(request for request in reversed(requests) if any(tool.get('function',{}).get('name') == 'read' for tool in request.get('tools',[])))
+    assert overridden_request['model'] == 'deepseek-v4.1-flash'
+    assert overridden_request.get('reasoning_effort') == 'medium', 'The native project setting did not override the bundled default'
 server.shutdown()
 print('Native OpenCode: explicit CLAUDE/glob instructions, session export/import and continuation passed with a local model stub.')

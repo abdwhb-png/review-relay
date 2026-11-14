@@ -1,5 +1,5 @@
 {
-    "model": "opencode-go/deepseek-v4.1-flash#high",
+    "model": "opencode-go/deepseek-v4.1-flash",
     "default_agent": "review",
     "agents": {
         "review": {
@@ -39,5 +39,16 @@
             "resource": "*.env*",
             "effect": "deny"
         }
-    ]
+    ],
+    "provider": {
+        "opencode-go": {
+            "models": {
+                "deepseek-v4.1-flash": {
+                    "options": {
+                        "reasoningEffort": "high"
+                    }
+                }
+            }
+        }
+    }
 }

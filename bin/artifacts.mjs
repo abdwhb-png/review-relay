@@ -221,9 +221,19 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     if (extracted.status !== 0) throw new Error('Invalid artifact archive.');
     const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
     const producer = manifest.producer;
+    const trustedAutomaticSource =
+        run.event === 'pull_request_target' &&
+        /^[a-f0-9]{40}$/.test(producer?.workflowSha || '') &&
+        (String(run.id) === env.GITHUB_RUN_ID
+            ? producer.workflowSha === env.GITHUB_WORKFLOW_SHA
+            : spawnSync(
+                  'git',
+                  ['merge-base', '--is-ancestor', producer.workflowSha, env.GITHUB_WORKFLOW_SHA],
+                  { stdio: 'ignore' },
+              ).status === 0);
     const sourceMatches =
         run.event === 'pull_request_target'
-            ? manifest.head === run.head_sha && producer?.workflowSha === manifest.base
+            ? manifest.head === run.head_sha && trustedAutomaticSource
             : producer?.workflowSha === run.head_sha;
     if (
         String(producer?.runId) !== String(run.id) ||

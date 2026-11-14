@@ -41,7 +41,7 @@ jobs:
         needs: request
         if: needs.request.outputs.allowed == 'true' && needs.request.outputs.command == 'review'
         concurrency: &reviewrelay-concurrency
-            group: reviewrelay-${{ github.repository }}-${{ fromJSON(needs.request.outputs.request || '{"number":0}').number }}
+            group: reviewrelay-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pull_request || github.run_id }}
             cancel-in-progress: true
         runs-on: ubuntu-latest
         permissions:

@@ -15,6 +15,7 @@ import {
     validateNativeToml,
     credentialName,
     nativeValue,
+    openCodeDefaults,
 } from './configuration.mjs';
 import { api, acknowledgeCommandComment, pullRevision, writeCheckRun } from './github-actions.mjs';
 import { spawnSync } from 'node:child_process';
@@ -738,14 +739,7 @@ function openCodeRuntime(provider, work, snapshot) {
     const { key } = providerSettings(provider);
     const env = process.env;
     const cli = resolve(env.OPENCODE_BIN);
-    const defaults = {
-        ...JSON.parse(readFileSync(new URL('../profiles/primary.json', import.meta.url), 'utf8')),
-        ...(provider === 'primary'
-            ? {}
-            : JSON.parse(
-                  readFileSync(new URL('../profiles/fallback.json', import.meta.url), 'utf8'),
-              )),
-    };
+    const defaults = openCodeDefaults(provider);
     const variables = nativeEnv('opencode', provider);
     const inline = JSON.parse(variables.OPENCODE_CONFIG_CONTENT || '{}');
     const config = {

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runtime } from './artifacts.mjs';
 import { runtimeCache } from './install-runtime.mjs';
+import { openCodeDefaults } from './configuration.mjs';
 
 const binary = process.env.OPENCODE_BIN;
 if (!binary)
@@ -56,6 +57,11 @@ for (const [fixture, operation, replay] of [
 ]) {
     const output = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'reviewrelay-native-'));
     try {
+        for (const provider of ['primary', 'fallback'])
+            writeFileSync(
+                join(output, `defaults-${provider}.json`),
+                JSON.stringify(openCodeDefaults(provider)),
+            );
         const result = spawnSync(
             'docker',
             [
