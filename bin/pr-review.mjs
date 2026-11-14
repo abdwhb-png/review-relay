@@ -195,8 +195,32 @@ function output(fields) {
 }
 
 function updateReviewCheck(title, description, conclusion) {
-    const id = process.env.REVIEW_CHECK_ID;
+    const env = process.env;
+    let id = env.REVIEW_CHECK_ID;
     if (!/^[1-9][0-9]*$/.test(id ?? '')) return;
+    if (Number(env.GITHUB_RUN_ATTEMPT) > 1) {
+        try {
+            const pages = api(
+                `repos/${env.GITHUB_REPOSITORY}/commits/${env.HEAD_SHA}/check-runs?filter=all&per_page=100`,
+                ['--paginate', '--slurp'],
+            );
+            const latest = pages
+                .flatMap((page) => page.check_runs)
+                .filter(
+                    (check) =>
+                        check.name === 'ReviewRelay PR review' &&
+                        check.external_id === `reviewrelay-${env.GITHUB_RUN_ID}` &&
+                        check.app?.slug === 'github-actions' &&
+                        Number.isSafeInteger(check.id),
+                )
+                .sort((a, b) => b.id - a.id)[0];
+            if (latest) id = String(latest.id);
+        } catch {
+            console.log(
+                '::warning::GitHub could not resolve the latest review check on retry; updating its original check.',
+            );
+        }
+    }
     const statusSummary = conclusion
         ? description
         : `${description}\n\nStage started at ${new Date().toISOString()}.`;
@@ -252,6 +276,7 @@ function authorize() {
         request.command === 'review' &&
         writeCheckRun({
             name: 'ReviewRelay PR review',
+            external_id: `reviewrelay-${env.GITHUB_RUN_ID}`,
             head_sha: revision.head,
             status: 'in_progress',
             output: { title: 'Review accepted', summary: 'Waiting for the analysis runner.' },

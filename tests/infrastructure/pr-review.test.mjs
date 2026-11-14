@@ -109,7 +109,15 @@ if (endpoint.endsWith('/actions/runs/900')) {
     console.log(JSON.stringify({id:900,event:process.env.FIXTURE_SOURCE_EVENT || 'issue_comment',head_branch:'main',path:process.env.FIXTURE_WRONG_WORKFLOW || '.github/workflows/custom.yml',head_sha:process.env.FIXTURE_SOURCE_EVENT === 'pull_request_target' ? process.env.HEAD_SHA : process.env.GITHUB_WORKFLOW_SHA,repository:{full_name:process.env.GITHUB_REPOSITORY},head_repository:{full_name:process.env.GITHUB_REPOSITORY}}));process.exit(0);
 }
 if(endpoint.endsWith('/permission')) { console.log(JSON.stringify({permission:process.env.FIXTURE_PERMISSION || 'write'}));process.exit(0); }
-if (endpoint.endsWith('/check-runs/123')) fs.appendFileSync('stages', fs.readFileSync(0, 'utf8') + '\\n');
+if (endpoint.includes('/commits/') && endpoint.includes('/check-runs?')) {
+    console.log(JSON.stringify([{check_runs:JSON.parse(process.env.FIXTURE_CHECK_RUNS || '[]')}]));process.exit(0);
+}
+if (/\\/check-runs\\/[0-9]+$/.test(endpoint)) {
+    const body=fs.readFileSync(0,'utf8');
+    fs.appendFileSync('check-updates',JSON.stringify({endpoint,body:JSON.parse(body)})+'\\n');
+    if(endpoint.endsWith('/123')) fs.appendFileSync('stages',body+'\\n');
+}
+
 if (endpoint.endsWith('/reviews') && !process.argv.includes('POST')) {
     console.log(JSON.stringify(fs.existsSync('published') ? fs.readFileSync('published','utf8').trim().split('\\n').filter(Boolean).map((r)=>({...JSON.parse(r),id:100,state:'COMMENTED',user:{login:'github-actions[bot]'},html_url:'https://github.com/fixture/review'})) : []));process.exit(0);
 }
@@ -741,7 +749,7 @@ else if (endpoint.endsWith('/reactions')) {
 }
 else if (endpoint.endsWith('/check-runs')) {
     const check = JSON.parse(fs.readFileSync(0, 'utf8'));
-    if (check.head_sha !== JSON.parse(process.env.FIXTURE_PULL).head.sha || check.status !== 'in_progress') process.exit(1);
+    if (check.head_sha !== JSON.parse(process.env.FIXTURE_PULL).head.sha || check.status !== 'in_progress' || check.external_id !== 'reviewrelay-'+process.env.GITHUB_RUN_ID) process.exit(1);
     console.log(JSON.stringify({ id: 123 }));
 }
 else console.log(process.env.FIXTURE_PULL);
@@ -761,6 +769,7 @@ else console.log(process.env.FIXTURE_PULL);
         GITHUB_REF: '',
         BASE_SHA: baseSha,
         HEAD_SHA: '',
+        GITHUB_RUN_ID: '900',
         FIXTURE_CALLS: calls,
         FIXTURE_PERMISSION: 'read',
         FIXTURE_PULL: JSON.stringify(pull),
@@ -1533,4 +1542,31 @@ await test('native header credentials are redacted and may rotate without discar
         OPENCODE_REPORT_DIR: reports,
     });
     assert.equal(changed.status, 1);
+});
+
+await test('a recovery updates the latest GitHub copy of its advisory check after repeated failed attempts', (t) => {
+    const { run, read } = reviewFixture(t);
+    const check = {
+        name: 'ReviewRelay PR review',
+        external_id: 'reviewrelay-900',
+        app: { slug: 'github-actions' },
+    };
+    const result = run('finish', {
+        GITHUB_RUN_ATTEMPT: '3',
+        PUBLISH_RESULT: 'success',
+        FIXTURE_CHECK_RUNS: JSON.stringify([
+            { ...check, id: 123 },
+            { ...check, id: 124 },
+            { ...check, id: 999, external_id: 'reviewrelay-899' },
+            { ...check, id: 1000, app: { slug: 'another-app' } },
+        ]),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const updates = read('check-updates')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].endpoint, `repos/${repo}/check-runs/124`);
+    assert.equal(updates[0].body.conclusion, 'success');
 });
