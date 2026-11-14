@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Status: local implementation candidate. Hosted qualification is pending; no stable release has been published.** See [qualification](docs/qualification.md) for the release gate.
+**Status: implementation candidate. Hosted qualification is in progress; no stable release has been published.** See [qualification](docs/qualification.md) for the release gate.
 
 ## Adopt the complete workflow
 

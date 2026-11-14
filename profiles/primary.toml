@@ -26,4 +26,4 @@ api_base = "https://opencode.ai/inference/go/openai/v1"
 custom_llm_provider = "openai"
 force_streaming_custom_llm_provider = "openai"
 force_streaming_api_base_substrings = ["https://opencode.ai/inference/go/openai/v1"]
-extra_headers = { "User-Agent" = "ReviewRelay-PR-Agent/1.0" }
+extra_headers = '{"User-Agent":"ReviewRelay-PR-Agent/1.0"}'

@@ -51,6 +51,7 @@ for (const [fixture, operation, replay] of [
     ['adapter_fixture.py', 'publish-suggestions', false],
     ['adapter_fixture.py', 'publish-suggestions', true],
     ['adapter_fixture.py', 'publish-summarized', false],
+    ['adapter_fixture.py', 'provider-settings', false],
     ['opencode_fixture.py', '', false],
 ]) {
     const output = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'reviewrelay-native-'));

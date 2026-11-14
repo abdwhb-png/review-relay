@@ -102,7 +102,7 @@ Path('/output/suggestions.json').write_text(json.dumps({'code_suggestions': [{
     'existing_code': 'old = False', 'improved_code': 'old = True',
     'suggestion_content': 'Preserve the existing behavior', 'one_sentence_summary': 'Preserve behavior', 'label': 'bug', 'score': 9,
 }], 'publication_settings': {'committable_code_suggestions': not summarized}}))
-sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else operation]
+sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else 'scope' if operation == 'provider-settings' else operation]
 captured = io.StringIO()
 try:
     with contextlib.redirect_stdout(captured):
@@ -111,7 +111,11 @@ except SystemExit as exit:
     assert exit.code in (None, 0), exit.code
 assert not unmodeled, f'Incomplete external HTTP fixture: {unmodeled}'
 assert not unfrozen, f'Native configuration read a mutable branch: {unfrozen}'
-if operation == 'scope':
+if operation == 'provider-settings':
+    from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
+    handler = LiteLLMAIHandler()
+    assert handler._request_headers['User-Agent'] == 'ReviewRelay-PR-Agent/1.0'
+elif operation == 'scope':
     scope = json.loads(captured.getvalue().splitlines()[-1])
     assert scope == {'incremental': False, 'start': BASE, 'first': None, 'paths': ['app.py']}, scope
 elif operation == 'render':
