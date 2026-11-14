@@ -11,7 +11,7 @@ import {
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { api } from './github-actions.mjs';
-import { credentialName } from './configuration.mjs';
+import { credentialName, nativeValue } from './configuration.mjs';
 
 export const runtime = JSON.parse(
     readFileSync(new URL('../runtime.json', import.meta.url), 'utf8'),
@@ -49,20 +49,14 @@ export function configurationDigest(config) {
         providerEnv,
         ...orchestration
     } = config;
-    function withoutCredentials(value) {
-        if (typeof value === 'string' && /^[[{]/.test(value.trim())) {
-            try {
-                return withoutCredentials(JSON.parse(value));
-            } catch {
-                return value;
-            }
-        }
+    function withoutCredentials(value, key) {
+        value = nativeValue(value, key);
         if (Array.isArray(value)) return value.map(withoutCredentials);
         if (!value || typeof value !== 'object') return value;
         return Object.fromEntries(
             Object.entries(value).map(([key, item]) => [
                 key,
-                credentialName(key) ? '<credential>' : withoutCredentials(item),
+                credentialName(key) ? '<credential>' : withoutCredentials(item, key),
             ]),
         );
     }

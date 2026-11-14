@@ -95,6 +95,7 @@ os.environ.update({
     'CONFIG__EXTRA_CONFIG_URL': '/tool/profiles/primary.toml',
     'REVIEW_REPO_SETTINGS_PRESENT': 'false',
     'REVIEW_PUBLICATION_MARKER': '<!-- reviewrelay:'+'a'*64+' -->',
+    'OPENAI_CUSTOM_HEADERS': 'x-opencode-session: reviewrelay-fixture/project-42',
 })
 Path('/output/review.json').write_text(json.dumps({'review': {'key_issues_to_review': []}, 'coverage': {}}))
 Path('/output/suggestions.json').write_text(json.dumps({'code_suggestions': [{
@@ -115,6 +116,7 @@ if operation == 'provider-settings':
     from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
     handler = LiteLLMAIHandler()
     assert handler._request_headers['User-Agent'] == 'ReviewRelay-PR-Agent/1.0'
+    assert handler._sdk_header_defaults['custom_headers']['x-opencode-session'] == 'reviewrelay-fixture/project-42'
 elif operation == 'scope':
     scope = json.loads(captured.getvalue().splitlines()[-1])
     assert scope == {'incremental': False, 'start': BASE, 'first': None, 'paths': ['app.py']}, scope

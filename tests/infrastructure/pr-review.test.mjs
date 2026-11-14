@@ -177,7 +177,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     const out = mount('/output');
     const input = mount('/input');
     fs.writeFileSync('native-arguments',JSON.stringify(args));
-    fs.writeFileSync('native-env',JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([k])=>k.includes('__')))));
+    fs.writeFileSync('native-env',JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([k])=>k.includes('__') || k === 'OPENAI_CUSTOM_HEADERS'))));
     if(args.includes('improve')) {
         fs.writeFileSync(out+'/improve.json',JSON.stringify({code_suggestions:[{relevant_file:'app.txt', relevant_lines_start:1, relevant_lines_end:1, improved_code:'Corrected value', existing_code:'Product change', suggestion_content:'Fix the regression', label:'bug'}],publication_settings:{committable_code_suggestions:true},usage:{}}));
         process.exit(0);
@@ -1409,4 +1409,46 @@ await test('manual authorization reads native configuration from the frozen PR b
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(outputs().request).base, baseSha);
+});
+
+await test('native SDK conversation headers have a stable default and remain overridable', (t) => {
+    const { run, read } = reviewFixture(t);
+    assert.equal(run('improve').status, 0);
+    assert.equal(
+        JSON.parse(read('native-env')).OPENAI_CUSTOM_HEADERS,
+        'x-opencode-session: reviewrelay-example/project-42',
+    );
+    const headers = 'x-opencode-session: consumer-conversation\nX-Consumer: custom';
+    const custom = run('improve', {
+        REVIEW_PROVIDER_ENV: JSON.stringify({ 'pr-agent': { OPENAI_CUSTOM_HEADERS: headers } }),
+    });
+    assert.equal(custom.status, 0, custom.stderr);
+    assert.equal(JSON.parse(read('native-env')).OPENAI_CUSTOM_HEADERS, headers);
+});
+
+await test('native header credentials are redacted and may rotate without discarding completed analysis', (t) => {
+    const { run, outputs } = reviewFixture(t);
+    const environment = (credential, client = 'consumer') => ({
+        OPENCODE_GO_API_KEY: '',
+        REVIEW_PROVIDER_ENV: JSON.stringify({
+            'pr-agent': {
+                OPENAI_CUSTOM_HEADERS: `Authorization: Bearer ${credential}\nX-Client: ${client}`,
+            },
+        }),
+    });
+    const first = run('analyze', environment('fixture-go-key'));
+    assert.equal(first.status, 0, first.stderr);
+    const reports = outputs().reports;
+    for (const name of ['opencode-report.md', 'opencode-session.json'])
+        assert.doesNotMatch(readFileSync(join(reports, name), 'utf8'), /fixture-go-key/);
+    const rotated = run('synthesize', {
+        ...environment('rotated-header-credential'),
+        OPENCODE_REPORT_DIR: reports,
+    });
+    assert.equal(rotated.status, 0, rotated.stderr);
+    const changed = run('synthesize', {
+        ...environment('rotated-header-credential', 'different-client'),
+        OPENCODE_REPORT_DIR: reports,
+    });
+    assert.equal(changed.status, 1);
 });

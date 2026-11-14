@@ -19,6 +19,28 @@ export function credentialName(key) {
     );
 }
 
+export function nativeValue(value, key) {
+    if (typeof value !== 'string') return value;
+    if (key === 'OPENAI_CUSTOM_HEADERS')
+        return Object.fromEntries(
+            value
+                .split('\n')
+                .filter((line) => line.includes(':'))
+                .map((line) => {
+                    const separator = line.indexOf(':');
+                    return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+                }),
+        );
+    if (/^[[{]/.test(value.trim())) {
+        try {
+            return JSON.parse(value);
+        } catch {
+            return value;
+        }
+    }
+    return value;
+}
+
 export function repositoryPath(value) {
     return (
         typeof value === 'string' &&

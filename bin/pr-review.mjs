@@ -14,6 +14,7 @@ import {
     repositoryPath,
     validateNativeToml,
     credentialName,
+    nativeValue,
 } from './configuration.mjs';
 import { api, acknowledgeCommandComment, pullRevision, writeCheckRun } from './github-actions.mjs';
 import { spawnSync } from 'node:child_process';
@@ -520,21 +521,15 @@ function docker(args, values, log, errorLog = log) {
 function redactReviewSecrets(text) {
     const env = process.env;
     const secrets = [env.OPENCODE_GO_API_KEY, env.OPENROUTER_API_KEY, env.GH_TOKEN];
-    function collect(value, sensitive = false) {
+    function collect(value, sensitive = false, key) {
+        value = nativeValue(value, key);
         if (value && typeof value === 'object') {
             for (const [key, item] of Object.entries(value))
-                collect(item, sensitive || credentialName(key));
+                collect(item, sensitive || credentialName(key), key);
         } else if (typeof value === 'string') {
             if (sensitive) {
                 secrets.push(value);
                 if (value.startsWith('Bearer ')) secrets.push(value.slice(7));
-            }
-            if (value.startsWith('{')) {
-                try {
-                    collect(JSON.parse(value));
-                } catch {
-                    /* Native configuration validation owns parsing. */
-                }
             }
         }
     }
@@ -625,6 +620,7 @@ function validateScope(scope) {
 
 function nativeSettings(excludedPaths = [], scope, provider = 'primary') {
     return {
+        OPENAI_CUSTOM_HEADERS: `x-opencode-session: reviewrelay-${process.env.GITHUB_REPOSITORY}-${process.env.PR_NUMBER}`,
         ...nativeEnv('pr-agent', provider),
         PR_AGENT_EXTRA_CONFIG_URL: '/opt/defaults.toml',
         CONFIG__FALLBACK_MODELS: '[]',
