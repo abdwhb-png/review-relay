@@ -1,0 +1,88 @@
+name: ReviewRelay
+description: Frozen-revision hybrid PR analysis, native synthesis, and isolated publication
+inputs:
+    operation:
+        description: authorize, analyze, synthesize, improve, publish, or finish
+        required: true
+    request:
+        description: Frozen request returned by authorize
+        default: ''
+    artifact-id:
+        description: Identified analysis, synthesis, or suggestions artifact
+        default: ''
+    config-path:
+        description: Repository-relative trusted orchestration configuration
+        default: .reviewrelay.json
+    overrides:
+        description: JSON orchestration overrides from the trusted caller workflow
+        default: '{}'
+    provider-env:
+        description: Secret JSON mapping opencode and pr-agent to native environment variables
+        default: '{}'
+    results:
+        description: Stage results for finish
+        default: '{}'
+outputs:
+    allowed:
+        description: Whether authorization accepted the request
+        value: ${{ steps.run.outputs.allowed }}
+    command:
+        description: Authorized command
+        value: ${{ steps.run.outputs.command }}
+    request:
+        description: Frozen authorized request
+        value: ${{ steps.run.outputs.request }}
+    artifact-id:
+        description: Verified stage artifact in the consumer repository
+        value: ${{ steps.upload.outputs.artifact-id }}
+    skipped:
+        description: Whether the review has no selected changes
+        value: ${{ steps.run.outputs.skipped }}
+    state:
+        description: Stage outcome or required recovery
+        value: ${{ steps.run.outputs.state }}
+    publication-url:
+        description: Published GitHub review URL
+        value: ${{ steps.run.outputs.publication-url }}
+runs:
+    using: composite
+    steps:
+        - id: prepare
+          shell: bash
+          env:
+              TOOL_ACTION_PATH: ${{ github.action_path }}
+              REVIEW_OPERATION: ${{ inputs.operation }}
+              REVIEW_REQUEST: ${{ inputs.request }}
+          run: node "$TOOL_ACTION_PATH/../bin/action.mjs" prepare
+        - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          with:
+              ref: ${{ steps.prepare.outputs.source-ref }}
+              persist-credentials: false
+              fetch-depth: 0
+        - shell: bash
+          env:
+              TOOL_ACTION_PATH: ${{ github.action_path }}
+              REVIEW_OPERATION: ${{ inputs.operation }}
+          run: node "$TOOL_ACTION_PATH/../bin/install-runtime.mjs"
+        - id: run
+          shell: bash
+          env:
+              TOOL_ACTION_PATH: ${{ github.action_path }}
+              GH_TOKEN: ${{ github.token }}
+              REVIEW_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+              REVIEW_OPERATION: ${{ inputs.operation }}
+              REVIEW_REQUEST: ${{ inputs.request }}
+              REVIEW_ARTIFACT_ID: ${{ inputs.artifact-id }}
+              REVIEW_CONFIG_PATH: ${{ inputs.config-path }}
+              REVIEW_OVERRIDES: ${{ inputs.overrides }}
+              REVIEW_PROVIDER_ENV: ${{ inputs.provider-env }}
+              REVIEW_RESULTS: ${{ inputs.results }}
+          run: node "$TOOL_ACTION_PATH/../bin/action.mjs" run
+        - id: upload
+          if: steps.run.outputs.reports != ''
+          uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          with:
+              name: reviewrelay-${{ inputs.operation }}-${{ steps.prepare.outputs.number }}-${{ github.run_attempt }}
+              path: ${{ steps.run.outputs.reports }}
+              retention-days: ${{ steps.run.outputs.retention-days }}
+              if-no-files-found: error

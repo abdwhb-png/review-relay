@@ -1,0 +1,19 @@
+{
+    "name": "review-relay",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test": "node --test tests/infrastructure/*.test.mjs",
+        "check": "node bin/check-source.mjs && oxlint --deny-warnings bin tests/infrastructure && oxfmt --check .",
+        "format": "oxfmt .",
+        "check:workflows": "node bin/check-workflows.mjs",
+        "test:native": "node bin/check-native.mjs"
+    },
+    "devDependencies": {
+        "oxfmt": "0.77.0",
+        "oxlint": "1.92.0"
+    },
+    "engines": {
+        "node": ">=24"
+    }
+}

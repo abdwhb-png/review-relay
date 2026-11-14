@@ -1,0 +1,6 @@
+ReviewRelay
+Copyright 2026 ReviewRelay contributors
+
+The review coordinator and native adapter were extracted from an existing project with authorization from its owner. Project-specific instructions, credentials, reports, and sessions are not part of this distribution.
+
+OpenCode and PR-Agent are separately downloaded upstream runtime distributions. Their license terms remain with their respective projects.
