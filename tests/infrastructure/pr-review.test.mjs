@@ -743,6 +743,10 @@ else console.log(process.env.FIXTURE_PULL);
         GITHUB_STEP_SUMMARY: summary,
         GITHUB_ACTOR: 'member',
         GITHUB_REPOSITORY: repo,
+        GITHUB_WORKFLOW_SHA: '',
+        GITHUB_REF: '',
+        BASE_SHA: '',
+        HEAD_SHA: '',
         FIXTURE_CALLS: calls,
         FIXTURE_PERMISSION: 'read',
         FIXTURE_PULL: JSON.stringify(pull),
@@ -761,7 +765,7 @@ else console.log(process.env.FIXTURE_PULL);
         },
         encoding: 'utf8',
     });
-    assert.equal(ineligible.status, 0);
+    assert.equal(ineligible.status, 0, ineligible.stderr);
     assert.equal(readFileSync(output, 'utf8'), '');
     assert.equal(
         readFileSync(calls, 'utf8'),
