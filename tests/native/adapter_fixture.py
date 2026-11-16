@@ -5,6 +5,9 @@ import io
 import json
 import os
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+import re
 import runpy
 import sys
 from urllib.parse import urlparse, parse_qs
@@ -97,6 +100,44 @@ os.environ.update({
     'REVIEW_PUBLICATION_MARKER': '<!-- reviewrelay:'+'a'*64+' -->',
     'OPENAI_CUSTOM_HEADERS': 'x-opencode-session: reviewrelay-fixture/project-42',
 })
+if operation in ('review-output', 'review-output-disabled'):
+    model_requests = []
+
+    class ModelAPI(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            model_requests.append(request)
+            prediction = 'review:\n  relevant_tests: "Yes"\n  security_concerns: "No"\n  key_issues_to_review: []\n'
+            response = {
+                'id': 'fixture-completion', 'object': 'chat.completion', 'created': 1,
+                'model': 'deepseek-v4.1-flash',
+                'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': prediction}, 'finish_reason': 'stop'}],
+                'usage': {'prompt_tokens': 123, 'completion_tokens': 45, 'total_tokens': 168},
+            }
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream' if request.get('stream') else 'application/json')
+            self.end_headers()
+            if request.get('stream'):
+                response['object'] = 'chat.completion.chunk'
+                response['choices'] = [{'index': 0, 'delta': {'role': 'assistant', 'content': prediction}, 'finish_reason': None}]
+                self.wfile.write(('data: ' + json.dumps(response) + '\n\n').encode())
+                response['choices'] = [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]
+                self.wfile.write(('data: ' + json.dumps(response) + '\n\ndata: [DONE]\n\n').encode())
+            else:
+                self.wfile.write(json.dumps(response).encode())
+
+    model_api = ThreadingHTTPServer(('127.0.0.1', 0), ModelAPI)
+    Thread(target=model_api.serve_forever, daemon=True).start()
+    os.environ.update({
+        'OPENAI__API_BASE': f'http://127.0.0.1:{model_api.server_port}/v1',
+        'OPENAI__KEY': 'fixture-model-key', 'REVIEW_COMMAND': 'review',
+        'CONFIG__OUTPUT_RUN_DETAILS': 'false' if operation.endswith('-disabled') else 'true',
+        'CONFIG__OUTPUT_RELEVANT_CONFIGURATIONS': 'true', 'PR_REVIEWER__ENABLE_HELP_TEXT': 'true',
+    })
+
 Path('/output/review.json').write_text(json.dumps({'review': {'key_issues_to_review': []}, 'coverage': {}}))
 Path('/output/suggestions.json').write_text(json.dumps({'code_suggestions': [{
     'relevant_file': 'app.py', 'relevant_lines_start': 1, 'relevant_lines_end': 1,
@@ -104,6 +145,9 @@ Path('/output/suggestions.json').write_text(json.dumps({'code_suggestions': [{
     'suggestion_content': 'Preserve the existing behavior', 'one_sentence_summary': 'Preserve behavior', 'label': 'bug', 'score': 9,
 }], 'publication_settings': {'committable_code_suggestions': not summarized}}))
 sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else 'scope' if operation == 'provider-settings' else operation]
+if operation in ('review-output', 'review-output-disabled'):
+    sys.argv = ['/tool/bin/pr-agent-native.py', 'generate', '--pr_url', pull['html_url'],
+                '--config-branch', BASE, '--json-output', '/output/review.json', 'review']
 captured = io.StringIO()
 try:
     with contextlib.redirect_stdout(captured):
@@ -120,9 +164,24 @@ if operation == 'provider-settings':
 elif operation == 'scope':
     scope = json.loads(captured.getvalue().splitlines()[-1])
     assert scope == {'incremental': False, 'start': BASE, 'first': None, 'paths': ['app.py']}, scope
-elif operation == 'render':
+elif operation in ('review-output', 'review-output-disabled'):
+    model_api.shutdown()
+    assert len(model_requests) == 1, model_requests
+    data = json.loads(Path('/output/review.json').read_text())
+    assert data['usage'] == {'prompt_tokens': 123, 'completion_tokens': 45, 'total_tokens': 168}, data
     rendered = json.loads(Path('/output/rendered.json').read_text())
-    assert rendered['body'] and rendered['anchor']
+    body = rendered['body']
+    assert rendered['anchor'] in body, rendered
+    assert 'Tool usage guide' in body, body
+    assert 'Relevant configurations' in body, body
+    if operation.endswith('-disabled'):
+        assert 'Agent run details' not in body, body
+    else:
+        assert 'Agent run details' in body, body
+        assert 'openai/deepseek-v4.1-flash' in body, body
+        assert '123 in / 45 out / 168 total' in body, body
+        assert re.search(r'Time cost.*?\d+\.\ds', body), body
+        assert re.search(r'AI calls.*?1', body), body
 elif operation in ('publish-suggestions', 'publish-summarized'):
     if os.environ.get('REVIEW_TEST_REPLAY'):
         assert not writes, 'already confirmed suggestions must not be published twice'

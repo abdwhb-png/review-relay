@@ -48,7 +48,8 @@ assert.equal(warmed.status, 0, 'Native tokenizer preparation failed.');
 
 for (const [fixture, operation, replay] of [
     ['adapter_fixture.py', 'scope', false],
-    ['adapter_fixture.py', 'render', false],
+    ['adapter_fixture.py', 'review-output', false],
+    ['adapter_fixture.py', 'review-output-disabled', false],
     ['adapter_fixture.py', 'publish-suggestions', false],
     ['adapter_fixture.py', 'publish-suggestions', true],
     ['adapter_fixture.py', 'publish-summarized', false],

@@ -156,10 +156,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
         fs.writeFileSync('suggestion-publications',fs.readFileSync(mount('/output')+'/suggestions.json','utf8'));
         if(process.env.OPENAI__KEY || process.env.OPENROUTER__KEY) throw new Error('Publication received provider credentials');
         console.log(JSON.stringify({published:1}));
-    } else {
-        fs.writeFileSync('render-env',JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([k])=>k.includes('__')))));
-        fs.writeFileSync(mount('/output')+'/rendered.json',JSON.stringify({body:'PR-Agent report fixture-gh-token',anchor:'Native reference'}));
-    }
+    } else throw new Error('Unexpected native operation');
 } else if (args.includes('debug')) {
     const src=mount('/review');
     const entries=fs.existsSync(src+'/opencode.json') ? [{type:'document', path:'/review/opencode.json', info:JSON.parse(fs.readFileSync(src+'/opencode.json','utf8'))}] : [];
@@ -203,6 +200,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     fs.copyFileSync(input + '/pr.diff', 'pr-agent.diff');
     fs.copyFileSync(input + '/' + process.env.ARTIFACT_PATH, 'pr-agent-input.md');
     fs.writeFileSync(out + '/review.json', JSON.stringify({review:{key_issues_to_review:[], summary:'fixture-gh-token'},coverage:{}}));
+    fs.writeFileSync(out+'/rendered.json',JSON.stringify({body:'PR-Agent report fixture-gh-token',anchor:'Native reference'}));
     console.log("Injected artifact context into tools: ['pr_reviewer']");
 }
 `,
@@ -305,7 +303,7 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
     const { producer, compatibility, configurationSha256, ...payload } = manifest;
     assert.equal(producer.runId, '900');
     assert.equal(producer.workflowSha, baseSha);
-    assert.equal(compatibility.version, '1.1.0');
+    assert.equal(compatibility.version, '1.1.1');
     assert.match(compatibility.engine, /^[a-f0-9]{64}$/);
     assert.match(configurationSha256, /^[a-f0-9]{64}$/);
     assert.deepEqual(payload, {
@@ -1450,7 +1448,7 @@ await test('a custom native configuration directory cannot bypass the executable
     assert.match(aliased.stderr, /repository-relative/);
 });
 
-await test('fallback synthesis retains its native presentation settings during final rendering', (t) => {
+await test('fallback synthesis applies its native presentation settings to the generated report', (t) => {
     const { run, outputs, read } = reviewFixture(t);
     const environment = {
         MANUAL: 'true',
@@ -1473,7 +1471,7 @@ await test('fallback synthesis retains its native presentation settings during f
         FIXTURE_FALLBACK_SUCCESS: 'true',
     });
     assert.equal(synthesis.status, 0, synthesis.stderr);
-    assert.equal(JSON.parse(read('render-env')).CONFIG__RESPONSE_LANGUAGE, 'fr-FR');
+    assert.equal(JSON.parse(read('native-env')).CONFIG__RESPONSE_LANGUAGE, 'fr-FR');
 });
 
 await test('native command failures expose the terminal exception while redacting provider credentials', (t) => {
