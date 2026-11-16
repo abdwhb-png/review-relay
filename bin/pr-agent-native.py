@@ -1,5 +1,4 @@
-"""Read native GitHub review scope and render native output without publishing."""
-import copy
+"""Prepare and archive native PR-Agent output separately from publication."""
 import asyncio
 import json
 import os
@@ -12,7 +11,6 @@ from pr_agent.algo.comment_identity import (
     add_pr_review_identity,
     format_pr_review_header,
 )
-from pr_agent.algo.utils import convert_to_markdown_v2
 from pr_agent.algo.file_filter import filter_ignored
 from pr_agent.git_providers.github_provider import GithubProvider
 from pr_agent.git_providers.git_provider import IncrementalPR
@@ -120,6 +118,26 @@ if sys.argv[1] == 'generate':
     native = get_settings().get(section + '.extra_instructions', '')
     os.environ[section.upper() + '__EXTRA_INSTRUCTIONS'] = '\n\n'.join(filter(None, [native, os.environ.get('REVIEW_EXTRA_INSTRUCTIONS', '')]))
     publication_settings = get_settings().pr_code_suggestions.to_dict() if section == 'pr_code_suggestions' else None
+    if section == 'pr_reviewer':
+        from pr_agent.agent.pr_agent import command2class
+        from pr_agent.tools.pr_reviewer import PRReviewer
+
+        class ArchivedPRReviewer(PRReviewer):
+            async def run(self):
+                await super().run()
+                # The native CLI discards its request settings on exit. Capture its
+                # complete dry-run output here while usage and timing still exist.
+                body = get_settings().get('data', {}).get('artifact')
+                if not isinstance(body, str) or not body.strip():
+                    raise RuntimeError('Missing native dry-run review output')
+                identity = PRReviewIdentity.INCREMENTAL.value if self.incremental.is_incremental else PRReviewIdentity.REGULAR.value
+                body = add_pr_review_identity(body, identity, self.git_provider)
+                anchor = add_pr_review_identity(
+                    format_pr_review_header(incremental=self.incremental.is_incremental), identity, self.git_provider
+                )
+                Path('/output/rendered.json').write_text(json.dumps({'body': body, 'anchor': anchor}))
+
+        command2class['review'] = ArchivedPRReviewer
     from pr_agent.cli import run
     result = run(inargs=sys.argv[2:])
     if result in (None, 0) and publication_settings is not None:
@@ -130,18 +148,5 @@ if sys.argv[1] == 'generate':
     sys.exit(result)
 elif sys.argv[1] == 'scope':
     print(json.dumps(scope))
-elif sys.argv[1] == 'render':
-    data = json.loads(Path('/output/review.json').read_text())
-    boundary = (
-        f'Starting from commit {provider.get_pr_url()}/commits/{scope["first"]}'
-        if scope['incremental'] else None
-    )
-    body = convert_to_markdown_v2(copy.deepcopy(data), True, boundary, provider, files)
-    identity = PRReviewIdentity.INCREMENTAL.value if scope['incremental'] else PRReviewIdentity.REGULAR.value
-    body = add_pr_review_identity(body, identity, provider)
-    anchor = add_pr_review_identity(
-        format_pr_review_header(incremental=scope['incremental']), identity, provider
-    )
-    Path('/output/rendered.json').write_text(json.dumps({'body': body, 'anchor': anchor}))
 else:
     raise RuntimeError('Unknown native review operation')

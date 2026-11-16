@@ -1098,18 +1098,6 @@ function prAgentAttempt(provider, work, prepared, improve = false) {
         return { ok: false };
     const structured = JSON.parse(readFileSync(join(dir, 'review.json'), 'utf8'));
     const { review, usage, coverage } = structured;
-    if (
-        !docker(
-            [
-                '--mount',
-                `type=bind,src=${dir},dst=/output`,
-                ...nativeAdapterArgs('render', provider),
-            ],
-            nativeSettings(prepared.excludedPaths, prepared.scope, provider),
-            join(dir, 'render.log'),
-        )
-    )
-        throw new Error('PR-Agent could not render the frozen native review.');
     const { body: report, anchor } = JSON.parse(readFileSync(join(dir, 'rendered.json'), 'utf8'));
     if (!report || !Array.isArray(review?.key_issues_to_review) || !coverage) return { ok: false };
     return {
