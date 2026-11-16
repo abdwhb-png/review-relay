@@ -2,13 +2,13 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.0.0:** the reusable workflow and composed operations passed hosted qualification in two private consumers. See [qualification](docs/qualification.md) for the evidence, runtime revision and boundaries.
+**Version 1.1.0 candidate:** manual draft reviews can be explicitly enabled. Targeted hosted qualification is in progress. See [qualification](docs/qualification.md) for the current evidence and the completed 1.0.0 qualification.
 
 ## Adopt the complete workflow
 
 Copy [the caller workflow](examples/workflow.yml), replace `REVIEWRELAY_SHA` with the reviewed ReviewRelay commit, and configure your provider credentials as Actions secrets. The caller needs `contents: read`, `actions: read`, `checks: write`, and `pull-requests: write`; the supplied workflow narrows permissions for each job. Enable access to this public action and reusable workflow in the consumer's Actions policy.
 
-The workflow accepts standalone `/review` and `/improve` comments from users with current write, maintain, or admin permission, and manual dispatch with a `pull_request` input from the default branch. Automatic review is off by default. Pull requests must be open, ready, internal to the consumer repository, and target its default branch or an explicitly configured target. Fork review is outside v1.
+The workflow accepts standalone `/review` and `/improve` comments from users with current write, maintain, or admin permission, and manual dispatch with a `pull_request` input from the default branch. Automatic review is off by default. Pull requests must be open, internal to the consumer repository, and target its default branch or an explicitly configured target. They must be ready by default; the orchestration settings below can explicitly permit manual draft reviews. Fork review is outside v1.
 
 The workflow calls `$/action`, so its action and engine resolve to the same commit as the reusable workflow. Consumers declare one version. GitHub.com and Linux x64 runners with Node.js 24+, Python 3.11+, Git, Docker, curl, and tar are required. GitHub Enterprise Server is outside v1. The supplied workflow prepares Node.js; the action delivers its scripts and checksum/digest-pinned runtimes.
 
@@ -21,12 +21,15 @@ The workflow calls `$/action`, so its action and engine resolve to the same comm
 | `schemaVersion`      | `1`                       | Configuration contract version.                                                                                                                       |
 | `autoReview`         | `false`                   | Review opened, reopened, ready, and synchronized eligible PRs.                                                                                        |
 | `manualFallback`     | `false`                   | Permit the fallback route only on authorized manual requests after a classified provider failure.                                                     |
+| `manualDraftReview`  | `false`                   | Permit draft PRs for authorized `/review`, `/improve` and manual dispatch. Automatic requests still reject drafts.                                    |
 | `baseBranches`       | Repository default branch | Nonempty list of permitted target branch names.                                                                                                       |
 | `excludeGlobs`       | `[]`                      | Repository-relative Git globs excluded from the primary diff. `!` rules keep matches regardless of order. Excluded source remains supporting context. |
 | `retentionDays`      | `0`                       | Artifact retention; zero uses the consumer repository policy. GitHub enforces its retention bounds.                                                   |
 | `instructionSources` | `[]`                      | Repository-relative files or globs to supply as trusted instructions. Each configured source must match a regular tracked file.                       |
 
 Orchestration precedence is defaults, then the file at the frozen base, then the caller's `overrides` JSON object. Source selection is explicit: for example, `"instructionSources": ["CLAUDE.md", "policy/**/*.md"]`. Shared sources are supplied through native instruction/context settings without duplicate text injection; native engine-specific sources retain their own scope. No instruction filename or per-project skill inventory is required. Standard native discovery remains available; ReviewRelay does not assume automatic `CLAUDE.md` discovery in the pinned OpenCode runtime. Native OpenCode instruction globs also select trusted base files, including protection against new head files matching those globs.
+
+For manual reviews of a stacked draft PR, enable `manualDraftReview` and list its permitted target branches in `baseBranches`, for example `{"manualDraftReview": true, "baseBranches": ["main", "stack/profile"]}`. This does not enable automatic reviews or infer allowed bases from the PR. Rights, repository identity and frozen revisions are checked again before generation and publication. New settings must be introduced together with a ReviewRelay version that supports them; older versions reject unknown settings.
 
 ## Configure the native engines
 

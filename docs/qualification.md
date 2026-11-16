@@ -1,8 +1,14 @@
 # Release qualification
 
+## Version 1.1.0
+
+Targeted hosted qualification of explicit manual draft reviews is in progress. The candidate keeps the pinned native runtimes from 1.0.0. Acceptance requires real analysis and frozen-commit publication through both interfaces on draft PRs targeting an explicitly allowed secondary branch, plus refusal without opt-in and automatic rejection of drafts. Consumer PRs and evidence remain private.
+
+## Version 1.0.0
+
 This document owns the evidence for the first stable ReviewRelay release. The runtime candidate is `5507efac5f82ec41b148a6aaaee920e369d310db`, with the native versions and supply-chain pins in [runtime.json](../runtime.json). Qualification was performed on 2026-11-14. Both hosted paths passed on this runtime revision.
 
-## Hosted paths
+### Hosted paths
 
 Both consumers are private. Their maintainers retain PR and run URLs, frozen revisions, artifact metadata, native sessions, reports and logs under consumer access controls; private review content is not copied into this public repository.
 
@@ -21,7 +27,7 @@ The native-settings probes used the real pinned clients and each consumer's froz
 
 A hosted regression probe reproduced GitHub's custom-check copying after repeated failed attempts: updating only the original check left the latest copy failed after recovery. Selecting the latest check with the same run identity passed the same probe and the real composed review recovery. Historical failed attempts remain visible; the latest completed check reflects the recovered outcome. An ordinary-comment concurrency regression was also reproduced and corrected in the earlier candidate; the authorization-scoped job concurrency implementation is unchanged in this candidate.
 
-## Automated and native evidence
+### Automated and native evidence
 
 The runtime candidate passed both [pull-request CI](https://github.com/abdwhb-png/review-relay/actions/runs/43630026947) and [push CI](https://github.com/abdwhb-png/review-relay/actions/runs/43630022211). The push run retried an initial Socket Firewall binary-download failure with the same dependency controls.
 
