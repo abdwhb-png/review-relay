@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.1.0:** explicitly enabled manual draft reviews passed hosted qualification through both interfaces on a secondary target branch. See [qualification](docs/qualification.md) for the evidence and boundaries.
+**Version 1.1.1:** published reviews retain native PR-Agent run details and configured footers, qualified through both hosted interfaces. See [qualification](docs/qualification.md) for the evidence and boundaries.
 
 ## Adopt the complete workflow
 
@@ -33,7 +33,7 @@ For manual reviews of a stacked draft PR, enable `manualDraftReview` and list it
 
 ## Configure the native engines
 
-Keep OpenCode JSON/JSONC and PR-Agent TOML in their native formats. The bundled profiles preserve the initial Go / DeepSeek V4.1 Flash / high behavior, including its existing timeout and token settings, as overridable defaults. Models, endpoints, effort, budgets, instructions, presentation, and supported provider credentials remain native settings. ReviewRelay has no renamed model or budget catalog.
+Keep OpenCode JSON/JSONC and PR-Agent TOML in their native formats. The bundled profiles preserve the initial Go / DeepSeek V4.1 Flash / high behavior, including its existing timeout and token settings, as overridable defaults. Models, endpoints, effort, budgets, instructions, presentation, and supported provider credentials remain native settings. ReviewRelay has no renamed model or budget catalog. Native PR-Agent presentation settings, including `config.output_run_details`, are preserved from its complete dry-run Markdown through isolated publication.
 
 OpenCode receives the bundled profile as global defaults, the trusted project's configuration and configuration directories, and native inline invocation settings. PR-Agent receives a bundled native host profile, the frozen repository settings, and native environment overrides through its own loader. `PR_AGENT_EXTRA_CONFIG_URL` may select a repository-relative trusted TOML file instead of the bundled host profile; this replaces that host-default layer, after which normal repository settings still apply. `OPENCODE_CONFIG` and `OPENCODE_CONFIG_DIR` must also be canonical repository-relative paths. Remote or host instruction sources, moving cross-repository settings repositories, and sibling-repository instruction context are rejected.
 

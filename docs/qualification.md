@@ -1,5 +1,13 @@
 # Release qualification
 
+## Version 1.1.1
+
+Runtime candidate `24a9b7320eec6e3d538801dd20e77d21d1ed9149` passed targeted qualification on 2026-11-16. Both [pull-request CI](https://github.com/abdwhb-png/review-relay/actions/runs/43885397221) and [push CI](https://github.com/abdwhb-png/review-relay/actions/runs/43885348684) passed: 44 infrastructure tests, source checks, actionlint and eight pinned-native scenarios. Native runtime versions, provider settings and dependency pins are unchanged.
+
+Synthesis now archives PR-Agent's complete native dry-run Markdown inside its request context, preserving configured run details and other native footers. A real pinned-CLI regression reproduced the lost output after successful model inference. The repaired fixture verifies native model, token, duration and call details, configured help/configuration sections, and `config.output_run_details = false`. Generation made no GitHub writes. Model and GitHub transports are the external fixture boundaries.
+
+In the private Python consumer, both the supplied reusable workflow and composed operations completed real Go inference and published native run details on their frozen heads. Token counts in each published block matched the structured usage artifact. Published review bodies matched their complete archived Markdown plus the verified publication marker. These are controlled regression cases, not a measurement of unknown-bug detection quality. Consumer content and raw evidence remain private. Only release documentation was added after the qualified runtime candidate.
+
 ## Version 1.1.0
 
 Runtime candidate `315f7fb6a8d0c96029507d9df388d5adde79988f` passed targeted qualification on 2026-11-16. Both [pull-request CI](https://github.com/abdwhb-png/review-relay/actions/runs/43863176579) and [push CI](https://github.com/abdwhb-png/review-relay/actions/runs/43863170581) passed: 44 infrastructure tests, source checks, actionlint and the seven pinned-native scenarios. The native adapter fixtures now use draft PR metadata and a secondary base. Native runtime versions, provider settings and dependency pins are unchanged.
