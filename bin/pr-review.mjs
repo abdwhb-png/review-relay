@@ -84,8 +84,8 @@ export function reviewRequest(eventName, event, automatic) {
     return null;
 }
 
-export function sameRevision(pull, repository, base, head, branches = ['main']) {
-    const current = pullRevision(pull, repository, branches);
+export function sameRevision(pull, repository, base, head, policy = {}) {
+    const current = pullRevision(pull, repository, policy);
     return current?.base === base && current.head === head;
 }
 
@@ -257,11 +257,15 @@ function authorize() {
     env.PR_NUMBER = String(request.number);
     configuration = undefined;
     if (!request.manual && env.AUTO_ENABLED !== 'true' && !settings().autoReview) return;
-    const revision = pullRevision(pull, env.GITHUB_REPOSITORY, settings().baseBranches);
+    const revision = pullRevision(pull, env.GITHUB_REPOSITORY, {
+        baseBranches: settings().baseBranches,
+        manualDraftReview: settings().manualDraftReview,
+        manual: request.manual,
+    });
     if (!revision) {
         if (request.manual)
             summary(
-                `Review skipped. The pull request must be open, ready for review, from this repository, and target ${settings().baseBranches.join(', ')}.`,
+                `Review skipped. The pull request must be open, ${settings().manualDraftReview ? '' : 'ready for review, '}from this repository, and target ${settings().baseBranches.join(', ')}.`,
             );
         return;
     }
@@ -314,13 +318,11 @@ function assertRevision() {
     if (
         pull.base?.sha !== env.BASE_SHA ||
         pull.head?.sha !== env.HEAD_SHA ||
-        !sameRevision(
-            pull,
-            env.GITHUB_REPOSITORY,
-            env.BASE_SHA,
-            env.HEAD_SHA,
-            settings().baseBranches,
-        )
+        !sameRevision(pull, env.GITHUB_REPOSITORY, env.BASE_SHA, env.HEAD_SHA, {
+            baseBranches: settings().baseBranches,
+            manualDraftReview: settings().manualDraftReview,
+            manual: env.MANUAL === 'true',
+        })
     ) {
         if (env.GITHUB_OUTPUT) output({ state: 'new-review-required' });
         throw new Error(`PR revision or eligibility changed. ${newReviewRequired}`);

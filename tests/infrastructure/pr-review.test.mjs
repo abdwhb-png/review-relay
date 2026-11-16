@@ -44,6 +44,7 @@ function reviewFixture(
     t,
     {
         branch = 'main',
+        draft = false,
         files = {},
         headFiles = {},
         guidance = ['AGENTS.md', 'apps/platform/AGENTS.md', 'apps/mobile/AGENTS.md'],
@@ -84,6 +85,7 @@ function reviewFixture(
     const headSha = git('rev-parse', 'HEAD');
     const expectedPull = {
         ...pull,
+        draft,
         base: { ...pull.base, ref: branch, sha: baseSha },
         head: { ...pull.head, sha: headSha },
     };
@@ -303,7 +305,7 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
     const { producer, compatibility, configurationSha256, ...payload } = manifest;
     assert.equal(producer.runId, '900');
     assert.equal(producer.workflowSha, baseSha);
-    assert.equal(compatibility.version, '1.0.0');
+    assert.equal(compatibility.version, '1.1.0');
     assert.match(compatibility.engine, /^[a-f0-9]{64}$/);
     assert.match(configurationSha256, /^[a-f0-9]{64}$/);
     assert.deepEqual(payload, {
@@ -1569,4 +1571,172 @@ await test('a recovery updates the latest GitHub copy of its advisory check afte
     assert.equal(updates.length, 1);
     assert.equal(updates[0].endpoint, `repos/${repo}/check-runs/124`);
     assert.equal(updates[0].body.conclusion, 'success');
+});
+
+await test('an opted-in manual draft review and improve publish on an explicitly permitted stacked base', (t) => {
+    const { run, outputs, write, read, fixture, expectedPull } = reviewFixture(t, {
+        branch: 'stack/base',
+        draft: true,
+        files: { '.reviewrelay.json': JSON.stringify({ manualDraftReview: false }) },
+    });
+    const context = {
+        FIXTURE_ACTION: 'true',
+        REVIEW_OVERRIDES: JSON.stringify({ manualDraftReview: true, baseBranches: ['stack/base'] }),
+        REVIEW_DEFAULT_BRANCH: 'main',
+        GITHUB_WORKFLOW_REF: 'example/project/.github/workflows/custom.yml@refs/heads/main',
+        GITHUB_REF: 'refs/heads/main',
+    };
+    const authorized = run('authorize', context);
+    assert.equal(authorized.status, 0, authorized.stderr);
+    assert.equal(outputs().allowed, 'true');
+    const review = { ...context, REVIEW_REQUEST: outputs().request };
+    const analysis = run('analyze', review);
+    assert.equal(analysis.status, 0, analysis.stderr);
+    const synthesized = run('synthesize', {
+        ...review,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: outputs().reports,
+    });
+    assert.equal(synthesized.status, 0, synthesized.stderr);
+    const archive = outputs().reports;
+    for (const changed of [
+        { FIXTURE_PERMISSION: 'read' },
+        { FIXTURE_PULL: JSON.stringify({ ...expectedPull, state: 'closed' }) },
+        { FIXTURE_PULL: JSON.stringify({ ...expectedPull, draft: null }) },
+        {
+            FIXTURE_PULL: JSON.stringify({
+                ...expectedPull,
+                head: { ...expectedPull.head, sha: '3'.repeat(40) },
+            }),
+        },
+        {
+            FIXTURE_PULL: JSON.stringify({
+                ...expectedPull,
+                base: { ...expectedPull.base, sha: '3'.repeat(40) },
+            }),
+        },
+        {
+            FIXTURE_PULL: JSON.stringify({
+                ...expectedPull,
+                base: { ...expectedPull.base, ref: 'other/base' },
+            }),
+        },
+        {
+            FIXTURE_PULL: JSON.stringify({
+                ...expectedPull,
+                head: { ...expectedPull.head, repo: { full_name: 'other/fork' } },
+            }),
+        },
+    ]) {
+        const denied = run('publish', {
+            ...review,
+            REVIEW_ARTIFACT_ID: '70',
+            FIXTURE_ARCHIVE_DIR: archive,
+            ...changed,
+        });
+        assert.equal(denied.status, 1, denied.stdout);
+        assert.ok(!readdirSync(fixture).includes('published'));
+    }
+    const published = run('publish', {
+        ...review,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: archive,
+    });
+    assert.equal(published.status, 0, published.stderr);
+    assert.equal(outputs().state, 'published');
+    assert.equal(JSON.parse(read('published')).commit_id, expectedPull.head.sha);
+    assert.equal(read('provider-calls'), 'opencode\npr-agent\n');
+
+    write('event.json', JSON.stringify({ ...manual, comment: { id: 124, body: '/improve' } }));
+    assert.equal(run('authorize', context).status, 0);
+    assert.equal(outputs().allowed, 'true');
+    const improve = { ...context, REVIEW_REQUEST: outputs().request };
+    const generated = run('improve', improve);
+    assert.equal(generated.status, 0, generated.stderr);
+    const suggestions = run('publish', {
+        ...improve,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: outputs().reports,
+    });
+    assert.equal(suggestions.status, 0, suggestions.stderr);
+    assert.equal(
+        JSON.parse(read('suggestion-publications')).code_suggestions[0].improved_code,
+        'Corrected value',
+    );
+    write('event.json', JSON.stringify({ inputs: { pull_request: '42' } }));
+    assert.equal(
+        run('authorize', { ...context, GITHUB_EVENT_NAME: 'workflow_dispatch' }).status,
+        0,
+    );
+    assert.equal(outputs().allowed, 'true');
+    assert.equal(JSON.parse(outputs().request).manual, true);
+});
+
+await test('draft authorization requires trusted opt-in, valid settings and a manual authorized event', (t) => {
+    for (const scenario of [
+        { name: 'default', config: {} },
+        { name: 'disabled', config: { manualDraftReview: false } },
+        {
+            name: 'invocation disables project opt-in',
+            config: { manualDraftReview: true },
+            overrides: { manualDraftReview: false },
+        },
+        {
+            name: 'head cannot opt in',
+            config: {},
+            headFiles: { '.reviewrelay.json': JSON.stringify({ manualDraftReview: true }) },
+        },
+        {
+            name: 'automatic stays disabled for drafts',
+            config: { manualDraftReview: true, autoReview: true },
+            automatic: true,
+        },
+        {
+            name: 'automatic event cannot review a PR converted to draft',
+            config: { manualDraftReview: true, autoReview: true },
+            automatic: 'converted',
+        },
+        {
+            name: 'insufficient permission',
+            config: { manualDraftReview: true },
+            permission: 'read',
+        },
+        { name: 'wrong base', config: { manualDraftReview: true, baseBranches: ['another/base'] } },
+        { name: 'invalid boolean', config: { manualDraftReview: 'true' }, status: 1 },
+    ]) {
+        const { run, outputs, write, fixture, expectedPull } = reviewFixture(t, {
+            branch: 'stack/base',
+            draft: true,
+            files: {
+                '.reviewrelay.json': JSON.stringify({
+                    baseBranches: ['stack/base'],
+                    ...scenario.config,
+                }),
+            },
+            headFiles: scenario.headFiles,
+        });
+        if (scenario.automatic)
+            write(
+                'event.json',
+                JSON.stringify({
+                    action: 'synchronize',
+                    number: 42,
+                    pull_request:
+                        scenario.automatic === 'converted'
+                            ? { ...expectedPull, draft: false }
+                            : expectedPull,
+                }),
+            );
+        const result = run('authorize', {
+            FIXTURE_ACTION: 'true',
+            REVIEW_OVERRIDES: JSON.stringify(scenario.overrides || {}),
+            FIXTURE_PERMISSION: scenario.permission || 'write',
+            GITHUB_EVENT_NAME: scenario.automatic ? 'pull_request_target' : 'issue_comment',
+        });
+        assert.equal(result.status, scenario.status || 0, scenario.name + ': ' + result.stderr);
+        assert.equal(outputs().allowed, undefined, scenario.name);
+        assert.ok(!readdirSync(fixture).includes('provider-calls'), scenario.name);
+        assert.ok(!readdirSync(fixture).includes('published'), scenario.name);
+        assert.equal(outputs().reports, undefined, scenario.name);
+    }
 });

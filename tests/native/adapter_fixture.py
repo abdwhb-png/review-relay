@@ -20,10 +20,10 @@ reads = []
 unfrozen = []
 unmodeled = []
 pull = {
-    'number': 42, 'id': 42, 'title': 'Fixture change', 'body': '', 'state': 'open', 'draft': False,
+    'number': 42, 'id': 42, 'title': 'Fixture change', 'body': '', 'state': 'open', 'draft': True,
     'html_url': 'https://github.com/fixture/project/pull/42', 'url':'https://api.github.com'+ROOT+'/pulls/42', 'issue_url':'https://api.github.com'+ROOT+'/issues/42', 'changed_files': 1, 'commits': 1,
     'additions': 1, 'deletions': 1, 'labels': [], 'user': {'login': 'contributor'},
-    'base': {'ref': 'trunk', 'sha': BASE, 'repo': {'full_name': 'fixture/project'}},
+    'base': {'ref': 'stack/base', 'sha': BASE, 'repo': {'full_name': 'fixture/project'}},
     'head': {'ref': 'change', 'sha': HEAD, 'repo': {'full_name': 'fixture/project'}},
 }
 file = {'filename': 'app.py', 'status': 'modified', 'additions': 1, 'deletions': 1,

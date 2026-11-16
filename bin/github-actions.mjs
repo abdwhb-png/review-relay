@@ -47,11 +47,16 @@ export function writeCheckRun(fields, id) {
     }
 }
 
-export function pullRevision(pull, repository, branches = ['main']) {
+export function pullRevision(
+    pull,
+    repository,
+    { baseBranches = ['main'], manual = false, manualDraftReview = false } = {},
+) {
     if (
         pull.state !== 'open' ||
-        pull.draft !== false ||
-        !branches.includes(pull.base?.ref) ||
+        (pull.draft !== false &&
+            !(pull.draft === true && manual === true && manualDraftReview === true)) ||
+        !baseBranches.includes(pull.base?.ref) ||
         pull.head?.repo?.full_name !== repository ||
         pull.base.repo?.full_name !== repository ||
         !/^[a-f0-9]{40}$/.test(pull.base.sha) ||

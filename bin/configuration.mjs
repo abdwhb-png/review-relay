@@ -6,6 +6,7 @@ const defaults = {
     schemaVersion: 1,
     autoReview: false,
     manualFallback: false,
+    manualDraftReview: false,
     baseBranches: null,
     excludeGlobs: [],
     retentionDays: 0,
@@ -137,6 +138,7 @@ export function loadConfiguration(env = process.env) {
         config.schemaVersion !== 1 ||
         typeof config.autoReview !== 'boolean' ||
         typeof config.manualFallback !== 'boolean' ||
+        typeof config.manualDraftReview !== 'boolean' ||
         !Number.isSafeInteger(config.retentionDays) ||
         config.retentionDays < 0 ||
         (config.baseBranches !== null &&
