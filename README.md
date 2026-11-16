@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.1.0 candidate:** manual draft reviews can be explicitly enabled. Targeted hosted qualification is in progress. See [qualification](docs/qualification.md) for the current evidence and the completed 1.0.0 qualification.
+**Version 1.1.0:** explicitly enabled manual draft reviews passed hosted qualification through both interfaces on a secondary target branch. See [qualification](docs/qualification.md) for the evidence and boundaries.
 
 ## Adopt the complete workflow
 

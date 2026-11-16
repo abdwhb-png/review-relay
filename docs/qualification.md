@@ -2,7 +2,17 @@
 
 ## Version 1.1.0
 
-Targeted hosted qualification of explicit manual draft reviews is in progress. The candidate keeps the pinned native runtimes from 1.0.0. Acceptance requires real analysis and frozen-commit publication through both interfaces on draft PRs targeting an explicitly allowed secondary branch, plus refusal without opt-in and automatic rejection of drafts. Consumer PRs and evidence remain private.
+Runtime candidate `315f7fb6a8d0c96029507d9df388d5adde79988f` passed targeted qualification on 2026-11-16. Both [pull-request CI](https://github.com/abdwhb-png/review-relay/actions/runs/43863176579) and [push CI](https://github.com/abdwhb-png/review-relay/actions/runs/43863170581) passed: 44 infrastructure tests, source checks, actionlint and the seven pinned-native scenarios. The native adapter fixtures now use draft PR metadata and a secondary base. Native runtime versions, provider settings and dependency pins are unchanged.
+
+The private qualification consumer verified these outcomes with real Go inference:
+
+- Without opt-in, a manual request declined the draft PR, skipped all generation/publication jobs and created no report or review.
+- Automatic events skipped both drafts, despite the trusted base enabling automatic review and manual draft review.
+- The complete reusable workflow accepted explicit invocation opt-in, analyzed and synthesized the draft, then published one review on the frozen head.
+- Composed operations accepted the trusted project-file opt-in after `/review`, completed the same lifecycle and published on their frozen head.
+- `/improve` published an applicable native suggestion on the composed draft's frozen head. Both manual commands received their acknowledgement.
+
+Both PRs remained drafts on the same secondary target with unchanged base/head revisions throughout qualification. Artifact manifests confirmed version 1.1.0, frozen revisions and producer runs. The tests cover lifecycle eligibility, including security refusals after opt-in. They do not measure unknown-bug detection quality. Private consumer reports, sessions and run evidence remain consumer-controlled. The release adds only documentation to the qualified runtime candidate.
 
 ## Version 1.0.0
 
