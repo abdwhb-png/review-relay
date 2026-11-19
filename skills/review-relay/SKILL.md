@@ -44,7 +44,7 @@ For multiple streams, preserve each stable reviewId and select its trusted nativ
 
 Prefer the supplied reusable workflow for the complete lifecycle. Start from its version-matched caller example and pin the workflow to the selected full SHA; it resolves its own matching action.
 
-Use composed operations only when the consumer needs custom orchestration. Start from the composed example, retain its authorization, permissions, concurrency and finalization, and keep every operation on the same revision.
+Use composed operations only when the consumer needs custom orchestration. Start from the composed example, retain its authorization, permissions, concurrency and finalization, and keep every operation on the same revision. Verify the complete caller against the selected version's README workflow trust boundary, including jobs reached through reusable workflows and third-party actions. Keep every artifact-capable job in the same trusted domain as ReviewRelay; move builds executing reviewed head code or less trusted dependencies into a separate workflow before activation. Stream identities and archive checksums do not establish trust between jobs.
 
 Reference the delivered workflow or action instead of copying ReviewRelay's engine scripts into the consumer. The action prepares its review runtimes; adopting it does not require application dependencies.
 

@@ -1,6 +1,6 @@
 # Independent review streams
 
-Date: 2026-11-19. Status: accepted design; implementation and multi-stream qualification pending.
+Date: 2026-11-19. Status: historical accepted design. Implementation and delivery evidence are owned by the [release qualification record](../qualification.md#version-120).
 
 ## Destination
 
@@ -115,6 +115,6 @@ The user selected adaptation at the ReviewRelay boundary. An artifact-owned prog
 
 Future requests for new inclusion syntax, selecting a named stream through comment arguments, or cross-workflow/version session migration require their own demonstrated need and compatibility analysis. A native dependency upgrade requires requalification of the adapter assumptions. None is a prerequisite for the accepted design.
 
-## Implementation handoff boundary
+## Original implementation handoff boundary
 
-Implementation remains pending. Extend existing configuration, identity, adapter, artifact and workflow owners rather than introducing a second orchestrator or replacing native incremental/session mechanisms. Plan focused regressions and live qualification from the accepted cases before changing production behavior. Do not present this design record as evidence that the new feature is implemented or qualified.
+At design acceptance, implementation remained pending. Extend existing configuration, identity, adapter, artifact and workflow owners rather than introducing a second orchestrator or replacing native incremental/session mechanisms. Plan focused regressions and live qualification from the accepted cases before changing production behavior. Do not present this design record as evidence that the new feature is implemented or qualified.

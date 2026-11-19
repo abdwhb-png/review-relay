@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.1.1:** published reviews retain native PR-Agent run details and configured footers, qualified through both hosted interfaces. See [qualification](docs/qualification.md) for the evidence and boundaries.
+**Version 1.2.0:** compose independent review streams across separate callers, reusable-workflow matrices or action chains within the documented [workflow trust boundary](#workflow-trust-boundary). See [qualification](docs/qualification.md) for the evidence and boundaries.
 
 ## Agent skill
 
@@ -43,7 +43,7 @@ For multiple reviews on one PR, give each additional stream a stable `reviewId` 
 
 Select a separate repository TOML with `prAgentConfigPath` (default `.pr_agent.toml`). This replaces the repository root layer while preserving native host defaults, environment overrides and applicable per-directory settings. A custom file must exist at the frozen base. For an example, adapt [the localization configuration](examples/reviewrelay.localization.json) and provide its trusted instructions and TOML.
 
-[The matrix caller](examples/multi-stream.yml) runs a complete workflow per stream in one run with `fail-fast: false`. Route automatic events and manual commands in the caller; a matrix's single output does not collect all publication URLs. Custom composed callers must pass each stream's own opaque request and artifact IDs, and use its authorization output `concurrency-group` for job concurrency. Generation and publication remain separate permission boundaries.
+[The matrix caller](examples/multi-stream.yml) runs a complete workflow per stream in one run with `fail-fast: false`. Route automatic events and manual commands in the caller; a matrix's single output does not collect all publication URLs. Custom composed callers must pass each stream's own opaque request and artifact IDs, and use its authorization output `concurrency-group` for job concurrency. Generation and publication remain separate permission boundaries. Each caller must satisfy the [workflow trust boundary](#workflow-trust-boundary).
 
 All participating callers must use the lane-capable version. Opaque requests and manifests now use format 2; configuration remains schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
 
@@ -70,7 +70,7 @@ Pass credentials and native invocation overrides through the `provider-env` secr
 
 For another primary provider, select its model and connection settings in the native configuration and supply that provider's native credential variables. For invocation overrides, OpenCode accepts `OPENCODE_CONFIG_CONTENT` as a JSON object serialized into a string; PR-Agent accepts its native `SECTION__KEY` environment names. The engines retain their own merge and list semantics. Configuration fingerprints include native noncredential overrides, so changing a token budget invalidates reuse while rotating a credential does not.
 
-ReviewRelay owns the safety constraints: frozen revisions, inspection-only OpenCode permissions, repository context from the frozen base, generation without native publication, explicit failure propagation, and coordinated fallback. Do not enable `config.publish_output`, native `fallback_models`, or `config.repo_context_from_default_branch` in PR-Agent files; conflicting settings fail. When `.pr_agent.toml` is absent at the frozen base, native repository-settings loading is disabled to prevent its fallback to a moving default branch. Include a root `.pr_agent.toml` when opting into native per-directory settings. Executable OpenCode extensions, MCP configuration, and custom SDK package declarations are outside the inspection sandbox; use the pinned runtime's built-in providers and declarative settings.
+ReviewRelay owns the safety constraints: frozen revisions, inspection-only OpenCode permissions, repository context from the frozen base, generation without native publication, explicit failure propagation, and coordinated fallback. Do not enable `config.publish_output`, native `fallback_models`, or `config.repo_context_from_default_branch` in PR-Agent files; conflicting settings fail. When the default `.pr_agent.toml` is absent at the frozen base, native repository-settings loading is disabled to prevent its fallback to a moving default branch. Include the selected repository TOML when opting into native per-directory settings. Executable OpenCode extensions, MCP configuration, and custom SDK package declarations are outside the inspection sandbox; use the pinned runtime's built-in providers and declarative settings.
 
 ## Compose operations
 
@@ -86,6 +86,12 @@ ReviewRelay owns the safety constraints: frozen revisions, inspection-only OpenC
 | `finish`     | `request`, `results` JSON for analyze/synthesize/improve/publish, skipped and state | Completes the advisory check                                  |
 
 Treat `request` as an opaque value returned by authorization. It is bound to the original event, actor, run, caller workflow, frozen base/head, and configuration fingerprint. Manual permission is checked again before inference and publication. Advanced callers own orchestration, permissions, finalization, and concurrency; copy the example's per-PR serialization.
+
+## Workflow trust boundary
+
+Every job capable of uploading artifacts in a workflow run containing ReviewRelay must belong to the same trusted domain as the review jobs. Verify the complete caller, including reusable workflows, third-party actions, scripts and dependencies executed by its other jobs. Keep builds that execute reviewed head code or less trusted dependencies in a separate workflow. The supplied review workflow and composed examples execute trusted review tools and inspect PR source as data.
+
+GitHub artifact metadata identifies the caller workflow and run. ReviewRelay verifies that provenance, compatibility and payload checksums; those checks do not authenticate the producing job against other artifact-capable jobs in the same run. Streams isolate review state within this shared trust domain. A recomputed checksum cannot establish trust in a substituted archive, and imported native sessions can contain authority such as permission settings. Supporting jobs with different trust levels in the same run requires additional producer authentication and session-authority controls; this release supports the whole-caller trust boundary above.
 
 ## Retention, continuation, and recovery
 
