@@ -38,6 +38,8 @@ Select trusted instruction files or globs from the project, including its existi
 
 Keep automatic review and provider fallback explicitly controlled. Enable manual draft review or additional target branches only when needed. Use native presentation settings for output such as Agent run details.
 
+For multiple streams, preserve each stable reviewId and select its trusted native TOML with prAgentConfigPath when needed. Read the chosen version's multi-stream examples. Keep each authorized request and artifact ID attached to its stream; consume the returned concurrency-group rather than inventing names. In a matrix, use fail-fast: false and account for GitHub's output aggregation rules. A globally failed producer run does not by itself invalidate a completed stream's verified context.
+
 ## 4. Integrate the versioned interface
 
 Prefer the supplied reusable workflow for the complete lifecycle. Start from its version-matched caller example and pin the workflow to the selected full SHA; it resolves its own matching action.

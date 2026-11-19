@@ -25,6 +25,7 @@ jobs:
             checks: write
             pull-requests: write
         outputs:
+            concurrency-group: ${{ steps.request.outputs.concurrency-group }}
             allowed: ${{ steps.request.outputs.allowed }}
             command: ${{ steps.request.outputs.command }}
             request: ${{ steps.request.outputs.request }}
@@ -41,7 +42,7 @@ jobs:
         needs: request
         if: needs.request.outputs.allowed == 'true' && needs.request.outputs.command == 'review'
         concurrency: &reviewrelay-concurrency
-            group: reviewrelay-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pull_request || github.run_id }}
+            group: ${{ needs.request.outputs.concurrency-group }}
             cancel-in-progress: true
         runs-on: ubuntu-latest
         permissions:

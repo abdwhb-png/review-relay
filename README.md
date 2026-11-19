@@ -22,6 +22,8 @@ The workflow calls `$/action`, so its action and engine resolve to the same comm
 
 | Field                | Default                   | Meaning                                                                                                                                               |
 | -------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reviewId`           | `null`                    | Stable named stream identifier; null preserves the historical stream.                                                                                 |
+| `prAgentConfigPath`  | `.pr_agent.toml`          | Trusted native repository TOML replacing the root layer.                                                                                              |
 | `schemaVersion`      | `1`                       | Configuration contract version.                                                                                                                       |
 | `autoReview`         | `false`                   | Review opened, reopened, ready, and synchronized eligible PRs.                                                                                        |
 | `manualFallback`     | `false`                   | Permit the fallback route only on authorized manual requests after a classified provider failure.                                                     |
@@ -34,6 +36,16 @@ The workflow calls `$/action`, so its action and engine resolve to the same comm
 Orchestration precedence is defaults, then the file at the frozen base, then the caller's `overrides` JSON object. Source selection is explicit: for example, `"instructionSources": ["CLAUDE.md", "policy/**/*.md"]`. Shared sources are supplied through native instruction/context settings without duplicate text injection; native engine-specific sources retain their own scope. No instruction filename or per-project skill inventory is required. Standard native discovery remains available; ReviewRelay does not assume automatic `CLAUDE.md` discovery in the pinned OpenCode runtime. Native OpenCode instruction globs also select trusted base files, including protection against new head files matching those globs.
 
 For manual reviews of a stacked draft PR, enable `manualDraftReview` and list its permitted target branches in `baseBranches`, for example `{"manualDraftReview": true, "baseBranches": ["main", "stack/profile"]}`. This does not enable automatic reviews or infer allowed bases from the PR. Rights, repository identity and frozen revisions are checked again before generation and publication. New settings must be introduced together with a ReviewRelay version that supports them; older versions reject unknown settings.
+
+## Independent review streams
+
+For multiple reviews on one PR, give each additional stream a stable `reviewId` in its trusted orchestration file. Reuse that ID across PRs; omitting it preserves the historical default stream. IDs use lowercase letters and digits with single separating hyphens, up to 64 characters. Different streams have independent native review history, checks, concurrency, artifacts and session continuation.
+
+Select a separate repository TOML with `prAgentConfigPath` (default `.pr_agent.toml`). This replaces the repository root layer while preserving native host defaults, environment overrides and applicable per-directory settings. A custom file must exist at the frozen base. For an example, adapt [the localization configuration](examples/reviewrelay.localization.json) and provide its trusted instructions and TOML.
+
+[The matrix caller](examples/multi-stream.yml) runs a complete workflow per stream in one run with `fail-fast: false`. Route automatic events and manual commands in the caller; a matrix's single output does not collect all publication URLs. Custom composed callers must pass each stream's own opaque request and artifact IDs, and use its authorization output `concurrency-group` for job concurrency. Generation and publication remain separate permission boundaries.
+
+All participating callers must use the lane-capable version. Opaque requests and manifests now use format 2; configuration remains schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
 
 ## Configure the native engines
 
@@ -66,7 +78,7 @@ ReviewRelay owns the safety constraints: frozen revisions, inspection-only OpenC
 
 | Operation    | Inputs                                                                              | Outputs                                                       |
 | ------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `authorize`  | GitHub event, configuration, provider environment                                   | `allowed`, `command`, frozen `request`                        |
+| `authorize`  | GitHub event, configuration, provider environment                                   | `allowed`, `command`, frozen `request`, `concurrency-group`   |
 | `analyze`    | `request`, same configuration and provider environment                              | Analysis `artifact-id`, or `skipped`                          |
 | `synthesize` | `request`, analysis `artifact-id`, same configuration and provider environment      | Synthesis `artifact-id`, recovery `state`                     |
 | `improve`    | Authorized improve `request`, configuration and provider environment                | Suggestions `artifact-id`                                     |

@@ -131,7 +131,7 @@ if (endpoint.endsWith('/reviews')) {
     fs.appendFileSync('published', review + '\\n');
     console.log(JSON.stringify({state:'COMMENTED',commit_id:JSON.parse(review).commit_id,html_url:'https://github.com/fixture/review'}));
 } else if (endpoint.includes('/actions/workflows/')) console.log('['+(process.env.FIXTURE_RUNS || '{"workflow_runs":[]}')+']');
-else if (endpoint.includes('/artifacts?')) console.log(JSON.stringify({artifacts:[{id:70,name:'reviewrelay-analyze-42-1',expired:false}]}));
+else if (endpoint.includes('/artifacts?')) console.log(process.env.FIXTURE_ARTIFACT_PAGES || JSON.stringify([{artifacts:[{id:70,name:process.env.FIXTURE_ARTIFACT_NAME || 'reviewrelay-analyze-42-1',expired:false}]}]));
 else if (endpoint.endsWith('/issues/42/comments')) {
     fs.appendFileSync('reference-calls','1'); fs.writeFileSync('reference',fs.readFileSync(0,'utf8')); console.log('{"id":3}');
 } else console.log(process.env.FIXTURE_PULL);
@@ -200,7 +200,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     fs.copyFileSync(input + '/pr.diff', 'pr-agent.diff');
     fs.copyFileSync(input + '/' + process.env.ARTIFACT_PATH, 'pr-agent-input.md');
     fs.writeFileSync(out + '/review.json', JSON.stringify({review:{key_issues_to_review:[], summary:'fixture-gh-token'},coverage:{}}));
-    fs.writeFileSync(out+'/rendered.json',JSON.stringify({body:'PR-Agent report fixture-gh-token',anchor:'Native reference'}));
+    fs.writeFileSync(out+'/rendered.json',JSON.stringify({...(process.env.FIXTURE_MISSING_NATIVE_BODY ? {} : {body:'PR-Agent report fixture-gh-token'}),anchor:'Native reference'}));
     console.log("Injected artifact context into tools: ['pr_reviewer']");
 }
 `,
@@ -303,14 +303,15 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
     const { producer, compatibility, configurationSha256, ...payload } = manifest;
     assert.equal(producer.runId, '900');
     assert.equal(producer.workflowSha, baseSha);
-    assert.equal(compatibility.version, '1.1.1');
+    assert.equal(compatibility.version, '1.2.0');
     assert.match(compatibility.engine, /^[a-f0-9]{64}$/);
     assert.match(configurationSha256, /^[a-f0-9]{64}$/);
     assert.deepEqual(payload, {
-        schemaVersion: 1,
+        schemaVersion: 2,
         kind: 'analysis',
         instructionPaths: [],
         repository: repo,
+        reviewId: null,
         number: 42,
         base: baseSha,
         head: headSha,
@@ -1029,7 +1030,7 @@ await test('analysis reuse rejects effective configuration changes and synthesis
     assert.equal(result.status, 0, result.stderr);
     assert.equal(outputs().review, undefined, 'reports must not pass through job outputs');
     const manifest = JSON.parse(readFileSync(join(outputs().reports, 'manifest.json'), 'utf8'));
-    assert.equal(manifest.schemaVersion, 1);
+    assert.equal(manifest.schemaVersion, 2);
     assert.equal(manifest.kind, 'synthesis');
     assert.equal(manifest.producer.runId, '900');
 });
@@ -1092,7 +1093,7 @@ await test('authorization returns a frozen public request independent of automat
     assert.equal(result.status, 0, result.stderr);
     assert.ok(outputs().request, 'authorization must return the public request');
     const request = JSON.parse(outputs().request);
-    assert.equal(request.schemaVersion, 1);
+    assert.equal(request.schemaVersion, 2);
     assert.equal(request.repository, repo);
     assert.equal(request.base, baseSha);
     assert.equal(request.head, headSha);
@@ -1737,4 +1738,189 @@ await test('draft authorization requires trusted opt-in, valid settings and a ma
         assert.ok(!readdirSync(fixture).includes('published'), scenario.name);
         assert.equal(outputs().reports, undefined, scenario.name);
     }
+});
+
+await test('authorization freezes a named stream and exposes its concurrency identity', (t) => {
+    const { run, outputs, fixture, write } = reviewFixture(t, {
+        files: {
+            '.reviewrelay.json': JSON.stringify({ reviewId: 'localization' }),
+        },
+    });
+    write('event.json', JSON.stringify({ ...manual, comment: { id: 123, body: '/review' } }));
+    const result = run('authorize', {
+        FIXTURE_ACTION: 'true',
+        GITHUB_EVENT_NAME: 'issue_comment',
+        GITHUB_EVENT_PATH: join(fixture, 'event.json'),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const request = JSON.parse(outputs().request);
+    assert.equal(request.schemaVersion, 2);
+    assert.equal(request.reviewId, 'localization');
+    assert.equal(request.configPath, '.reviewrelay.json');
+    assert.equal(request.prAgentConfigPath, '.pr_agent.toml');
+    assert.equal(outputs()['concurrency-group'], 'reviewrelay-example/project-42-localization');
+});
+
+await test('named stream artifacts and publication retain their authorized identity without publisher credentials', (t) => {
+    const { run, outputs, fixture, write, read } = reviewFixture(t, {
+        files: { '.reviewrelay.json': JSON.stringify({ reviewId: 'localization' }) },
+    });
+    write('event.json', JSON.stringify({ ...manual, comment: { id: 123, body: '/review' } }));
+    const event = {
+        FIXTURE_ACTION: 'true',
+        GITHUB_EVENT_NAME: 'issue_comment',
+        GITHUB_EVENT_PATH: join(fixture, 'event.json'),
+    };
+    assert.equal(run('authorize', event).status, 0);
+    const request = outputs().request;
+    const environment = { ...event, REVIEW_REQUEST: request };
+    const analysis = run('analyze', environment);
+    assert.equal(analysis.status, 0, analysis.stderr);
+    const artifact = outputs().reports;
+    const manifest = JSON.parse(readFileSync(join(artifact, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.schemaVersion, 2);
+    assert.equal(manifest.reviewId, 'localization');
+    const synthesis = run('synthesize', {
+        ...environment,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: artifact,
+    });
+    assert.equal(synthesis.status, 0, synthesis.stderr);
+    const reports = outputs().reports;
+    assert.equal(
+        JSON.parse(read('native-env')).OPENAI_CUSTOM_HEADERS,
+        'x-opencode-session: reviewrelay-example/project-42-localization',
+    );
+    const wrong = run('publish', {
+        ...environment,
+        REVIEW_OVERRIDES: '{"reviewId":"security"}',
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: reports,
+    });
+    assert.equal(wrong.status, 1);
+    assert.match(wrong.stderr, /authorized|identity|selection/i);
+    const published = run('publish', {
+        ...environment,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: reports,
+        REVIEW_PROVIDER_ENV: '{}',
+    });
+    assert.equal(published.status, 0, published.stderr);
+    assert.match(
+        JSON.parse(read('published')).body,
+        /^<!-- reviewrelay:stream:localization -->\n\nPR-Agent report/,
+    );
+    assert.match(
+        JSON.parse(read('reference')).body,
+        /^<!-- reviewrelay:stream:localization -->\n\nNative reference/,
+    );
+});
+
+await test('a completed stream resumes its session from a globally failed run', (t) => {
+    const { run, outputs, git, write, read, expectedPull, headSha, baseSha } = reviewFixture(t, {
+        files: { '.reviewrelay.json': JSON.stringify({ reviewId: 'localization' }) },
+    });
+    const initial = run('analyze');
+    assert.equal(initial.status, 0, initial.stderr);
+    const previous = outputs().reports;
+    write('app.txt', 'Product change\nFollow-up change\n');
+    git('add', 'app.txt');
+    git('commit', '-qm', 'Follow-up');
+    const head = git('rev-parse', 'HEAD');
+    const resumed = run('analyze', {
+        HEAD_SHA: head,
+        GITHUB_RUN_ID: '901',
+        FIXTURE_PULL: JSON.stringify({
+            ...expectedPull,
+            head: { ...expectedPull.head, sha: head },
+        }),
+        FIXTURE_NATIVE_SCOPE: JSON.stringify({
+            incremental: true,
+            start: headSha,
+            first: head,
+            paths: ['app.txt'],
+        }),
+        FIXTURE_RUNS: JSON.stringify({
+            workflow_runs: [
+                {
+                    id: 900,
+                    head_branch: 'main',
+                    head_sha: baseSha,
+                    event: 'issue_comment',
+                    conclusion: 'failure',
+                },
+            ],
+        }),
+        FIXTURE_PREVIOUS_DIR: previous,
+        FIXTURE_ARTIFACT_NAME: 'reviewrelay-analyze-42-localization-1',
+        FIXTURE_ARTIFACT_PAGES: JSON.stringify([
+            {
+                artifacts: [
+                    { id: 80, name: 'reviewrelay-analyze-42-localization-other-1', expired: false },
+                ],
+            },
+            {
+                artifacts: [
+                    { id: 70, name: 'reviewrelay-analyze-42-localization-1', expired: false },
+                ],
+            },
+        ]),
+    });
+    assert.equal(resumed.status, 0, resumed.stderr);
+    assert.match(resumed.stdout, /Resuming OpenCode session from run 900/);
+    assert.match(read('session-imports'), /Previous context/);
+    assert.match(read('opencode.diff'), /Follow-up change/);
+    assert.doesNotMatch(read('opencode.diff'), /^\+Product change/m);
+});
+
+await test('stream identifiers and selected TOMLs are validated at authorization', (t) => {
+    const { run, outputs, fixture, write } = reviewFixture(t, {
+        files: {
+            '.reviewrelay.json': JSON.stringify({
+                reviewId: 'localization',
+                prAgentConfigPath: '.pr_agent.localization.toml',
+            }),
+            '.pr_agent.toml': '[config]\npublish_output = true\n',
+            '.pr_agent.localization.toml': '[pr_reviewer]\nextra_instructions = "localization"\n',
+        },
+    });
+    write('event.json', JSON.stringify({ ...manual, comment: { id: 123, body: '/review' } }));
+    const event = {
+        FIXTURE_ACTION: 'true',
+        GITHUB_EVENT_NAME: 'issue_comment',
+        GITHUB_EVENT_PATH: join(fixture, 'event.json'),
+    };
+    const accepted = run('authorize', event);
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.equal(JSON.parse(outputs().request).prAgentConfigPath, '.pr_agent.localization.toml');
+    for (const reviewId of ['', 'Upper', 'a--b', '-a', 'a-', 'a/b', 'a'.repeat(65), 1]) {
+        const invalid = run('authorize', {
+            ...event,
+            REVIEW_OVERRIDES: JSON.stringify({ reviewId }),
+        });
+        assert.equal(invalid.status, 1, JSON.stringify(reviewId));
+        assert.match(invalid.stderr, /reviewId/);
+        assert.equal(outputs().request, undefined);
+    }
+    for (const path of ['../outside.toml', '/tmp/settings.toml', 'missing.toml']) {
+        const invalid = run('authorize', {
+            ...event,
+            REVIEW_OVERRIDES: JSON.stringify({ prAgentConfigPath: path }),
+        });
+        assert.equal(invalid.status, 1, path);
+        assert.equal(outputs().request, undefined);
+    }
+});
+
+await test('a named stream refuses incomplete native Markdown before archival', (t) => {
+    const { run, outputs } = reviewFixture(t, {
+        files: { '.reviewrelay.json': JSON.stringify({ reviewId: 'localization' }) },
+    });
+    assert.equal(run('analyze').status, 0);
+    const result = run('synthesize', {
+        OPENCODE_REPORT_DIR: outputs().reports,
+        FIXTURE_MISSING_NATIVE_BODY: 'true',
+    });
+    assert.equal(result.status, 1);
+    assert.equal(outputs().reports, undefined);
 });

@@ -13,6 +13,8 @@ import { spawnSync } from 'node:child_process';
 import { api } from './github-actions.mjs';
 import { credentialName, nativeValue } from './configuration.mjs';
 
+export const artifactSchemaVersion = 2;
+
 export const runtime = JSON.parse(
     readFileSync(new URL('../runtime.json', import.meta.url), 'utf8'),
 );
@@ -95,6 +97,7 @@ export function archiveIdentity(config) {
     const env = process.env;
     return {
         repository: env.GITHUB_REPOSITORY,
+        reviewId: config.reviewId,
         number: Number(env.PR_NUMBER),
         base: env.BASE_SHA,
         head: env.HEAD_SHA,
@@ -114,7 +117,7 @@ export function writeManifest(directory, kind, config, metadata = {}) {
     );
     const env = process.env;
     const manifest = {
-        schemaVersion: 1,
+        schemaVersion: artifactSchemaVersion,
         kind,
         ...archiveIdentity(config),
         producer: {
@@ -137,7 +140,7 @@ export function readManifest(directory, kind, config, { previousHead } = {}) {
     const expected = archiveIdentity(config);
     if (previousHead) expected.head = previousHead;
     if (
-        manifest.schemaVersion !== 1 ||
+        manifest.schemaVersion !== artifactSchemaVersion ||
         manifest.kind !== kind ||
         Object.entries(expected).some(
             ([key, value]) =>

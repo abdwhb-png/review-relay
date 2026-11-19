@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 
 const defaults = {
     schemaVersion: 1,
+    reviewId: null,
+    prAgentConfigPath: '.pr_agent.toml',
     autoReview: false,
     manualFallback: false,
     manualDraftReview: false,
@@ -12,6 +14,32 @@ const defaults = {
     retentionDays: 0,
     instructionSources: [],
 };
+
+export function reviewIdentity(reviewId, env = process.env) {
+    if (
+        reviewId !== null &&
+        (typeof reviewId !== 'string' ||
+            reviewId.length > 64 ||
+            !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(reviewId))
+    )
+        throw new Error(
+            'Invalid reviewId; use a lowercase kebab-case identifier of 1–64 characters.',
+        );
+    const suffix = reviewId === null ? '' : `-${reviewId}`;
+    const root = `reviewrelay-${env.GITHUB_REPOSITORY}-${env.PR_NUMBER}`;
+    return {
+        checkName: `ReviewRelay PR review${reviewId === null ? '' : ` (${reviewId})`}`,
+        externalId: `reviewrelay-${env.GITHUB_RUN_ID}${suffix}`,
+        concurrencyGroup: root + suffix,
+        sessionHeader: `x-opencode-session: ${root}${suffix}`,
+        marker: reviewId === null ? '' : `<!-- reviewrelay:stream:${reviewId} -->`,
+        artifactName: (operation) =>
+            `reviewrelay-${operation}-${env.PR_NUMBER}${suffix}-${env.GITHUB_RUN_ATTEMPT}`,
+        analysisArtifactPattern: new RegExp(
+            `^reviewrelay-analyze-${env.PR_NUMBER}${suffix}-[1-9][0-9]*$`,
+        ),
+    };
+}
 
 export function openCodeDefaults(provider = 'primary') {
     if (!['primary', 'fallback'].includes(provider)) throw new Error('Unknown native profile.');
@@ -154,10 +182,16 @@ export function loadConfiguration(env = process.env) {
         config.excludeGlobs.some((glob) => typeof glob !== 'string')
     )
         throw new Error('Invalid ReviewRelay configuration settings.');
+    reviewIdentity(config.reviewId, env);
+    if (!repositoryPath(config.prAgentConfigPath)) throw new Error('Invalid prAgentConfigPath.');
+    if (config.prAgentConfigPath !== '.pr_agent.toml' && !files.has(config.prAgentConfigPath))
+        throw new Error('Selected native repository settings are missing at the trusted revision.');
     const instructionPaths = [...files.keys()].filter((name) =>
         config.instructionSources.some((glob) => matchesGlob(name, glob)),
     );
-    const nativeToml = [...files.keys()].filter((name) => /(^|\/)\.pr_agent\.toml$/.test(name));
+    const nativeToml = [...files.keys()].filter(
+        (name) => name === config.prAgentConfigPath || name.endsWith('/.pr_agent.toml'),
+    );
     for (const name of nativeToml) {
         validateNativeToml(readTrusted(ref, name), ref, name);
     }

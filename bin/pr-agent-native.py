@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import re
+import tomllib
 from pathlib import Path
 import sys
 
@@ -18,6 +19,42 @@ from pr_agent.git_providers.utils import apply_repo_settings
 from pr_agent.config_loader import get_settings
 from pr_agent.algo.setting_utils import normalize_setting_list
 from pr_agent.algo.repo_context import _sibling_repo_context_entries
+
+
+class ReviewRelayGithubProvider(GithubProvider):
+    def __init__(self, pr_url=None):
+        super().__init__(pr_url)
+        self._reviewrelay_settings = b''
+        if pr_url and os.environ.get('REVIEW_REPO_SETTINGS_PRESENT') != 'false':
+            path = os.environ.get('REVIEW_PR_AGENT_CONFIG_PATH', '.pr_agent.toml')
+            snapshot = self._resolve_settings_snapshot(os.environ['BASE_SHA'])
+            contents = self.get_repo_settings_contents([path], snapshot[0])
+            if path not in contents:
+                raise RuntimeError('Selected native repository settings are unavailable at the frozen base')
+            from pr_agent.custom_merge_loader import validate_file_security
+            validate_file_security(tomllib.loads(contents[path].decode()), path)
+            self._reviewrelay_settings = contents[path]
+            self._repo_settings_snapshot = snapshot
+        self._repo_settings_acquired = True
+
+    def get_repo_settings(self):
+        return self._reviewrelay_settings
+
+    def get_previous_review(self, *, full, incremental):
+        marker = os.environ.get('REVIEW_STREAM_MARKER', '')
+        candidates = []
+        for comment in self.pr.get_issue_comments():
+            first_line = (comment.body or '').split('\n', 1)[0]
+            if (first_line == marker if marker else not first_line.startswith('<!-- reviewrelay:stream:')):
+                candidates.append(comment)
+        if not candidates:
+            return None
+        self.comments = candidates
+        return super().get_previous_review(full=full, incremental=incremental)
+
+
+from pr_agent.git_providers import _GIT_PROVIDERS
+_GIT_PROVIDERS['github'] = ReviewRelayGithubProvider
 
 
 url = f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/pull/{os.environ["PR_NUMBER"]}'
@@ -43,7 +80,7 @@ excluded = json.loads(os.environ.get('REVIEW_EXCLUDED_REGEX', '[]'))
 ignored = normalize_setting_list(get_settings().ignore.regex)
 os.environ['IGNORE__REGEX'] = json.dumps(list(dict.fromkeys([*ignored, *excluded])))
 get_settings().set('ignore.regex', json.loads(os.environ['IGNORE__REGEX']))
-provider = GithubProvider(url)
+provider = ReviewRelayGithubProvider(url)
 if (provider.pr.base.sha, provider.pr.head.sha) != (
     os.environ['BASE_SHA'], os.environ['HEAD_SHA']
 ):

@@ -2,8 +2,8 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { configurationDigest } from './artifacts.mjs';
-import { loadConfiguration } from './configuration.mjs';
-import { reviewRequest } from './pr-review.mjs';
+import { loadConfiguration, repositoryPath, reviewIdentity } from './configuration.mjs';
+import { reviewRequest, requestSchemaVersion } from './pr-review.mjs';
 
 const operations = ['authorize', 'analyze', 'synthesize', 'improve', 'publish', 'finish'];
 
@@ -18,7 +18,7 @@ try {
         const request = JSON.parse(env.REVIEW_REQUEST || 'null');
         if (
             !request ||
-            request.schemaVersion !== 1 ||
+            request.schemaVersion !== requestSchemaVersion ||
             request.repository !== env.GITHUB_REPOSITORY ||
             request.runId !== env.GITHUB_RUN_ID ||
             request.sourceWorkflowRef !== env.GITHUB_WORKFLOW_REF ||
@@ -35,6 +35,9 @@ try {
             !/^[a-z0-9][a-z0-9-]*(?:\[bot\])?$/i.test(request.actor)
         )
             throw new Error('Missing or invalid authorized request for this consumer run.');
+        reviewIdentity(request.reviewId, env);
+        if (!repositoryPath(request.configPath) || !repositoryPath(request.prAgentConfigPath))
+            throw new Error('Invalid authorized configuration selection.');
         const eventRequest = reviewRequest(
             env.GITHUB_EVENT_NAME,
             JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')),
@@ -68,9 +71,26 @@ try {
         if (!/^[a-f0-9]{40}$/.test(ref || ''))
             throw new Error('Missing trusted checkout revision.');
         appendFileSync(env.GITHUB_OUTPUT, `source-ref=${ref}\nnumber=${env.PR_NUMBER || ''}\n`);
+        if (operation !== 'authorize')
+            appendFileSync(
+                env.GITHUB_OUTPUT,
+                `artifact-name=${reviewIdentity(JSON.parse(env.REVIEW_REQUEST).reviewId, env).artifactName(operation)}\n`,
+            );
     } else if (process.argv[2] === 'run') {
         if (operation === 'publish' && env.REVIEW_PROVIDER_ENV && env.REVIEW_PROVIDER_ENV !== '{}')
             throw new Error('Publication must not receive provider-env credentials.');
+        if (operation !== 'authorize') {
+            const request = JSON.parse(env.REVIEW_REQUEST);
+            const config = loadConfiguration(env);
+            if (
+                config.reviewId !== request.reviewId ||
+                config.path !== request.configPath ||
+                config.prAgentConfigPath !== request.prAgentConfigPath
+            )
+                throw new Error(
+                    'Configuration selection differs from the authorized stream identity.',
+                );
+        }
         if (
             !['authorize', 'finish', 'publish'].includes(operation) &&
             configurationDigest(loadConfiguration(env)) !== env.REVIEW_EXPECTED_CONFIG
