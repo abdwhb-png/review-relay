@@ -1,5 +1,6 @@
 import {
     runtime,
+    artifactSchemaVersion,
     digest,
     writeManifest,
     readManifest,
@@ -10,6 +11,7 @@ import {
 } from './artifacts.mjs';
 import {
     loadConfiguration,
+    reviewIdentity,
     readTrusted,
     repositoryPath,
     validateNativeToml,
@@ -41,6 +43,7 @@ function settings() {
     return (configuration ??= loadConfiguration());
 }
 
+export const requestSchemaVersion = 2;
 const image = runtime.prAgent.image;
 const sha = /^[0-9a-f]{40}$/;
 const actorName = /^[a-z0-9][a-z0-9-]*$/i;
@@ -208,8 +211,8 @@ function updateReviewCheck(title, description, conclusion) {
                 .flatMap((page) => page.check_runs)
                 .filter(
                     (check) =>
-                        check.name === 'ReviewRelay PR review' &&
-                        check.external_id === `reviewrelay-${env.GITHUB_RUN_ID}` &&
+                        check.name === reviewIdentity(settings().reviewId).checkName &&
+                        check.external_id === reviewIdentity(settings().reviewId).externalId &&
                         check.app?.slug === 'github-actions' &&
                         Number.isSafeInteger(check.id),
                 )
@@ -279,8 +282,8 @@ function authorize() {
     const check =
         request.command === 'review' &&
         writeCheckRun({
-            name: 'ReviewRelay PR review',
-            external_id: `reviewrelay-${env.GITHUB_RUN_ID}`,
+            name: reviewIdentity(settings().reviewId).checkName,
+            external_id: reviewIdentity(settings().reviewId).externalId,
             head_sha: revision.head,
             status: 'in_progress',
             output: { title: 'Review accepted', summary: 'Waiting for the analysis runner.' },
@@ -290,7 +293,10 @@ function authorize() {
         ...revision,
         allowed: true,
         request: JSON.stringify({
-            schemaVersion: 1,
+            schemaVersion: requestSchemaVersion,
+            reviewId: settings().reviewId,
+            configPath: settings().path,
+            prAgentConfigPath: settings().prAgentConfigPath,
             repository: env.GITHUB_REPOSITORY,
             ...request,
             ...revision,
@@ -301,6 +307,7 @@ function authorize() {
             configurationSha256: archiveIdentity(settings()).configurationSha256,
             check: Number.isSafeInteger(check?.id) ? String(check.id) : '',
         }),
+        'concurrency-group': reviewIdentity(settings().reviewId).concurrencyGroup,
         'retention-days': settings().retentionDays,
         ...(Number.isSafeInteger(check?.id) ? { check: check.id } : {}),
     });
@@ -648,7 +655,7 @@ function validateScope(scope) {
 
 function nativeSettings(excludedPaths = [], scope, provider = 'primary') {
     return {
-        OPENAI_CUSTOM_HEADERS: `x-opencode-session: reviewrelay-${process.env.GITHUB_REPOSITORY}-${process.env.PR_NUMBER}`,
+        OPENAI_CUSTOM_HEADERS: reviewIdentity(settings().reviewId).sessionHeader,
         ...nativeEnv('pr-agent', provider),
         PR_AGENT_EXTRA_CONFIG_URL: '/opt/defaults.toml',
         CONFIG__FALLBACK_MODELS: '[]',
@@ -667,7 +674,9 @@ function nativeSettings(excludedPaths = [], scope, provider = 'primary') {
         CONFIG__CONFIG_BRANCH: process.env.BASE_SHA,
         CONFIG__REPO_CONTEXT_FROM_DEFAULT_BRANCH: 'false',
         CONFIG__GLOBAL_SETTINGS_REPO: '',
-        REVIEW_REPO_SETTINGS_PRESENT: String(settings().files.has('.pr_agent.toml')),
+        REVIEW_REPO_SETTINGS_PRESENT: String(settings().files.has(settings().prAgentConfigPath)),
+        REVIEW_PR_AGENT_CONFIG_PATH: settings().prAgentConfigPath,
+        REVIEW_STREAM_MARKER: reviewIdentity(settings().reviewId).marker,
         REVIEW_INSTRUCTION_PATHS: JSON.stringify(settings().instructionPaths),
         CONFIG__PUBLISH_OUTPUT: 'false',
         REVIEW_EXCLUDED_REGEX: JSON.stringify(
@@ -713,7 +722,7 @@ function nativeScope(work, excludedPaths, full = false, expected) {
 function previousSession(work, scope, globs) {
     const env = process.env;
     const pages = api(
-        `repos/${env.GITHUB_REPOSITORY}/actions/workflows/${encodeURIComponent(workflowPath().split('/').at(-1))}/runs?status=success&per_page=100`,
+        `repos/${env.GITHUB_REPOSITORY}/actions/workflows/${encodeURIComponent(workflowPath().split('/').at(-1))}/runs?per_page=100`,
         ['--paginate', '--slurp'],
     );
     const runs = pages.flatMap((page) => page.workflow_runs);
@@ -725,20 +734,22 @@ function previousSession(work, scope, globs) {
                 ? run.head_sha === scope.start
                 : ['issue_comment', 'workflow_dispatch'].includes(run.event) &&
                   run.head_branch === env.GITHUB_WORKFLOW_REF.split('@refs/heads/')[1];
-        if (String(run.id) === env.GITHUB_RUN_ID || !trusted || run.conclusion !== 'success')
-            continue;
-        const { artifacts } = api(
+        if (String(run.id) === env.GITHUB_RUN_ID || !trusted) continue;
+        const artifacts = api(
             `repos/${env.GITHUB_REPOSITORY}/actions/runs/${run.id}/artifacts?per_page=100`,
-        );
+            ['--paginate', '--slurp'],
+        ).flatMap((page) => page.artifacts);
         for (const artifact of artifacts.filter(
             (item) =>
-                !item.expired && item.name.startsWith(`reviewrelay-analyze-${env.PR_NUMBER}-`),
+                !item.expired &&
+                reviewIdentity(settings().reviewId).analysisArtifactPattern.test(item.name),
         )) {
             const dir = downloadArtifact(artifact.id, work);
             const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
             const identity = archiveIdentity(settings());
             if (
-                manifest.schemaVersion !== 1 ||
+                manifest.schemaVersion !== artifactSchemaVersion ||
+                manifest.reviewId !== identity.reviewId ||
                 manifest.repository !== identity.repository ||
                 manifest.number !== identity.number ||
                 manifest.base !== identity.base ||
@@ -1098,7 +1109,19 @@ function prAgentAttempt(provider, work, prepared, improve = false) {
         return { ok: false };
     const structured = JSON.parse(readFileSync(join(dir, 'review.json'), 'utf8'));
     const { review, usage, coverage } = structured;
-    const { body: report, anchor } = JSON.parse(readFileSync(join(dir, 'rendered.json'), 'utf8'));
+    const { body, anchor: nativeAnchor } = JSON.parse(
+        readFileSync(join(dir, 'rendered.json'), 'utf8'),
+    );
+    if (
+        typeof body !== 'string' ||
+        !body.trim() ||
+        typeof nativeAnchor !== 'string' ||
+        !nativeAnchor.trim()
+    )
+        throw new Error('Incomplete native review Markdown or history anchor.');
+    const marker = reviewIdentity(settings().reviewId).marker;
+    const report = marker ? `${marker}\n\n${body}` : body;
+    const anchor = marker ? `${marker}\n\n${nativeAnchor}` : nativeAnchor;
     if (!report || !Array.isArray(review?.key_issues_to_review) || !coverage) return { ok: false };
     return {
         ok: true,

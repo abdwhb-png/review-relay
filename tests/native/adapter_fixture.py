@@ -44,6 +44,8 @@ def request(self, verb, url, parameters=None, headers=None, input=None, **kwargs
         return {}, {'id': 99, 'state': 'COMMENTED', 'commit_id': HEAD,
                     'html_url': 'https://github.com/fixture/project/pull/42#fixture'}
     reads.append(path)
+    if path == '/user':
+        return {}, {'login':'github-actions[bot]','id':1}
     if path == ROOT:
         return {}, {'id': 1, 'full_name': 'fixture/project', 'default_branch': 'trunk',
                     'owner': {'login': 'fixture', 'type': 'Organization'}}
@@ -52,7 +54,7 @@ def request(self, verb, url, parameters=None, headers=None, input=None, **kwargs
     if path == ROOT + '/pulls/42/files':
         return {}, [file]
     if path == ROOT + '/pulls/42/commits':
-        return {}, [{'sha': HEAD, 'commit': {'message': 'Fixture change'}, 'parents': [{'sha': BASE}]}]
+        return {}, [{'sha': HEAD, 'commit': {'message': 'Fixture change', 'author': {'date': '2026-01-01T00:00:00Z'}, 'committer': {'date': '2026-01-01T00:00:00Z'}}, 'parents': [{'sha': BASE}]}]
     if path.startswith(ROOT + '/commits/'):
         ref=path.rsplit('/',1)[1]
         if ref not in (BASE,HEAD): unfrozen.append(ref)
@@ -69,6 +71,11 @@ def request(self, verb, url, parameters=None, headers=None, input=None, **kwargs
         return {}, {'type':'file','encoding':'base64','content':base64.b64encode(content).decode(),'path':'app.py'}
     if path == ROOT + '/languages':
         return {}, {'Python': 10}
+    if path in (ROOT + '/contents/.pr_agent.toml', ROOT + '/contents/.pr_agent.localization.toml') and operation in ('repository-settings','repository-review-output'):
+        assert query.get('ref') in (BASE,[BASE]), query
+        label = 'LOCALIZATION_ONLY_FIXTURE_CONTEXT' if path.endswith('localization.toml') else 'GENERAL_ONLY_FIXTURE_CONTEXT'
+        content = f'[pr_reviewer]\nextra_instructions = "{label}"\n'
+        return {}, {'type':'file','encoding':'base64','path':path.rsplit('/',1)[1],'content':base64.b64encode(content.encode()).decode()}
     if path == ROOT + '/contents/CLAUDE.md':
         ref = query.get('ref')
         assert ref == BASE or ref == [BASE], f'Instruction source was not frozen: {ref}'
@@ -80,6 +87,8 @@ def request(self, verb, url, parameters=None, headers=None, input=None, **kwargs
         existing=[{'id':88,'body':'<!-- reviewrelay:'+'a'*64+':0 -->','user':{'login':'github-actions[bot]'},'commit_id':HEAD}] if os.environ.get('REVIEW_TEST_REPLAY') else []
         return {}, existing + [{**comment,'id':99+i,'user':{'login':'github-actions[bot]'},'commit_id':HEAD} for path_, payload in writes if path_.endswith('/reviews') for i,comment in enumerate(payload.get('comments',[]))]
     if path == ROOT + '/issues/42/comments':
+        if len(sys.argv) > 1 and operation in ('stream-scope','named-stream-scope','own-stream-scope'):
+            return {}, [{'id':77,'body':('' if operation == 'named-stream-scope' else '<!-- reviewrelay:stream:localization -->\n\n')+'## PR Reviewer Guide\n\n<!-- pr-agent:review:full -->','user':{'login':'github-actions[bot]'},'created_at':'2026-01-02T00:00:00Z'}]
         return {}, [{**payload,'id':99,'user':{'login':'github-actions[bot]'}} for path_,payload in writes if path_.endswith('/comments')]
     if path == ROOT + '/pulls/42/reviews':
         return {}, []
@@ -100,7 +109,7 @@ os.environ.update({
     'REVIEW_PUBLICATION_MARKER': '<!-- reviewrelay:'+'a'*64+' -->',
     'OPENAI_CUSTOM_HEADERS': 'x-opencode-session: reviewrelay-fixture/project-42',
 })
-if operation in ('review-output', 'review-output-disabled'):
+if operation in ('review-output', 'review-output-disabled', 'repository-review-output'):
     model_requests = []
 
     class ModelAPI(BaseHTTPRequestHandler):
@@ -138,14 +147,19 @@ if operation in ('review-output', 'review-output-disabled'):
         'CONFIG__OUTPUT_RELEVANT_CONFIGURATIONS': 'true', 'PR_REVIEWER__ENABLE_HELP_TEXT': 'true',
     })
 
+if operation in ('named-stream-scope','own-stream-scope'):
+    os.environ['REVIEW_STREAM_MARKER']='<!-- reviewrelay:stream:localization -->'
+if operation in ('repository-settings','repository-review-output'):
+    os.environ.update({'REVIEW_REPO_SETTINGS_PRESENT':'true','REVIEW_PR_AGENT_CONFIG_PATH':'.pr_agent.localization.toml'})
+
 Path('/output/review.json').write_text(json.dumps({'review': {'key_issues_to_review': []}, 'coverage': {}}))
 Path('/output/suggestions.json').write_text(json.dumps({'code_suggestions': [{
     'relevant_file': 'app.py', 'relevant_lines_start': 1, 'relevant_lines_end': 1,
     'existing_code': 'old = False', 'improved_code': 'old = True',
     'suggestion_content': 'Preserve the existing behavior', 'one_sentence_summary': 'Preserve behavior', 'label': 'bug', 'score': 9,
 }], 'publication_settings': {'committable_code_suggestions': not summarized}}))
-sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else 'scope' if operation == 'provider-settings' else operation]
-if operation in ('review-output', 'review-output-disabled'):
+sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else 'scope' if operation in ('provider-settings','stream-scope','named-stream-scope','own-stream-scope','repository-settings') else operation]
+if operation in ('review-output', 'review-output-disabled', 'repository-review-output'):
     sys.argv = ['/tool/bin/pr-agent-native.py', 'generate', '--pr_url', pull['html_url'],
                 '--config-branch', BASE, '--json-output', '/output/review.json', 'review']
 captured = io.StringIO()
@@ -156,17 +170,26 @@ except SystemExit as exit:
     assert exit.code in (None, 0), exit.code
 assert not unmodeled, f'Incomplete external HTTP fixture: {unmodeled}'
 assert not unfrozen, f'Native configuration read a mutable branch: {unfrozen}'
-if operation == 'provider-settings':
+if operation == 'repository-settings':
+    from pr_agent.config_loader import get_settings
+    assert get_settings().pr_reviewer.extra_instructions == 'LOCALIZATION_ONLY_FIXTURE_CONTEXT', get_settings().pr_reviewer.extra_instructions
+elif operation == 'provider-settings':
     from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
     handler = LiteLLMAIHandler()
     assert handler._request_headers['User-Agent'] == 'ReviewRelay-PR-Agent/1.0'
     assert handler._sdk_header_defaults['custom_headers']['x-opencode-session'] == 'reviewrelay-fixture/project-42'
-elif operation == 'scope':
+elif operation == 'own-stream-scope':
+    scope=json.loads(captured.getvalue().splitlines()[-1])
+    assert scope['incremental'] is True and scope['start'] == HEAD, scope
+elif operation in ('scope','stream-scope','named-stream-scope'):
     scope = json.loads(captured.getvalue().splitlines()[-1])
     assert scope == {'incremental': False, 'start': BASE, 'first': None, 'paths': ['app.py']}, scope
-elif operation in ('review-output', 'review-output-disabled'):
+elif operation in ('review-output', 'review-output-disabled', 'repository-review-output'):
     model_api.shutdown()
     assert len(model_requests) == 1, model_requests
+    if operation == 'repository-review-output':
+        prompt=json.dumps(model_requests[0]['messages'])
+        assert 'LOCALIZATION_ONLY_FIXTURE_CONTEXT' in prompt and 'GENERAL_ONLY_FIXTURE_CONTEXT' not in prompt, prompt
     data = json.loads(Path('/output/review.json').read_text())
     assert data['usage'] == {'prompt_tokens': 123, 'completion_tokens': 45, 'total_tokens': 168}, data
     rendered = json.loads(Path('/output/rendered.json').read_text())

@@ -23,6 +23,9 @@ inputs:
         description: Stage results for finish
         default: '{}'
 outputs:
+    concurrency-group:
+        description: Opaque per-stream concurrency key returned by authorization
+        value: ${{ steps.run.outputs.concurrency-group }}
     allowed:
         description: Whether authorization accepted the request
         value: ${{ steps.run.outputs.allowed }}
@@ -82,7 +85,7 @@ runs:
           if: steps.run.outputs.reports != ''
           uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
           with:
-              name: reviewrelay-${{ inputs.operation }}-${{ steps.prepare.outputs.number }}-${{ github.run_attempt }}
+              name: ${{ steps.prepare.outputs.artifact-name }}
               path: ${{ steps.run.outputs.reports }}
               retention-days: ${{ steps.run.outputs.retention-days }}
               if-no-files-found: error

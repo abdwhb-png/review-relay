@@ -1,0 +1,25 @@
+name: Independent review streams
+on:
+    workflow_dispatch:
+        inputs:
+            pull_request:
+                description: Pull request number
+                type: string
+                required: true
+permissions: {}
+jobs:
+    review:
+        strategy:
+            fail-fast: false
+            matrix:
+                config: [.reviewrelay.json, .reviewrelay.localization.json]
+        permissions:
+            contents: read
+            actions: read
+            checks: write
+            pull-requests: write
+        uses: abdwhb-png/review-relay/.github/workflows/review.yml@REVIEWRELAY_SHA
+        with:
+            config-path: ${{ matrix.config }}
+        secrets:
+            provider-env: ${{ secrets.REVIEWRELAY_PROVIDER_ENV }}
