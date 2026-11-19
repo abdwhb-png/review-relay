@@ -4,6 +4,10 @@ ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolat
 
 **Version 1.1.1:** published reviews retain native PR-Agent run details and configured footers, qualified through both hosted interfaces. See [qualification](docs/qualification.md) for the evidence and boundaries.
 
+## Agent skill
+
+Copy [skills/review-relay](skills/review-relay/SKILL.md) into your agent's project skill directory, for example `.agents/skills/review-relay/` when supported. Reload skills or start a new session as required by your agent, then invoke `review-relay` to configure and operate the project's GitHub Actions integration. The skill covers adoption, native configuration, review commands, recovery and upgrades using the selected ReviewRelay version's documentation.
+
 ## Adopt the complete workflow
 
 Copy [the caller workflow](examples/workflow.yml), replace `REVIEWRELAY_SHA` with the reviewed ReviewRelay commit, and configure your provider credentials as Actions secrets. The caller needs `contents: read`, `actions: read`, `checks: write`, and `pull-requests: write`; the supplied workflow narrows permissions for each job. Enable access to this public action and reusable workflow in the consumer's Actions policy.
