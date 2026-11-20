@@ -18,6 +18,8 @@ from github.Requester import Requester
 BASE = '1' * 40
 HEAD = '2' * 40
 ROOT = '/repos/fixture/project'
+stream_scope_operations = ('stream-scope', 'named-stream-scope', 'own-stream-scope',
+                           'visible-stream-scope', 'visible-incremental-stream-scope')
 writes = []
 reads = []
 unfrozen = []
@@ -87,8 +89,14 @@ def request(self, verb, url, parameters=None, headers=None, input=None, **kwargs
         existing=[{'id':88,'body':'<!-- reviewrelay:'+'a'*64+':0 -->','user':{'login':'github-actions[bot]'},'commit_id':HEAD}] if os.environ.get('REVIEW_TEST_REPLAY') else []
         return {}, existing + [{**comment,'id':99+i,'user':{'login':'github-actions[bot]'},'commit_id':HEAD} for path_, payload in writes if path_.endswith('/reviews') for i,comment in enumerate(payload.get('comments',[]))]
     if path == ROOT + '/issues/42/comments':
-        if len(sys.argv) > 1 and operation in ('stream-scope','named-stream-scope','own-stream-scope'):
-            return {}, [{'id':77,'body':('' if operation == 'named-stream-scope' else '<!-- reviewrelay:stream:localization -->\n\n')+'## PR Reviewer Guide\n\n<!-- pr-agent:review:full -->','user':{'login':'github-actions[bot]'},'created_at':'2026-01-02T00:00:00Z'}]
+        if operation in stream_scope_operations:
+            prefix = '' if operation == 'named-stream-scope' else '<!-- reviewrelay:stream:localization -->\n\n'
+            heading, identity = '## PR Reviewer Guide', '<!-- pr-agent:review:full -->'
+            if operation.startswith('visible-'):
+                prefix = '<!-- reviewrelay:stream:localization -->\n**Review stream:** `localization`\n'
+            if operation == 'visible-incremental-stream-scope':
+                heading, identity = '## Incremental PR Reviewer Guide', '<!-- pr-agent:review:incremental -->'
+            return {}, [{'id':77,'body':prefix+heading+'\n\n'+identity,'user':{'login':'github-actions[bot]'},'created_at':'2026-01-02T00:00:00Z'}]
         return {}, [{**payload,'id':99,'user':{'login':'github-actions[bot]'}} for path_,payload in writes if path_.endswith('/comments')]
     if path == ROOT + '/pulls/42/reviews':
         return {}, []
@@ -147,7 +155,7 @@ if operation in ('review-output', 'review-output-disabled', 'repository-review-o
         'CONFIG__OUTPUT_RELEVANT_CONFIGURATIONS': 'true', 'PR_REVIEWER__ENABLE_HELP_TEXT': 'true',
     })
 
-if operation in ('named-stream-scope','own-stream-scope'):
+if operation in stream_scope_operations and operation != 'stream-scope':
     os.environ['REVIEW_STREAM_MARKER']='<!-- reviewrelay:stream:localization -->'
 if operation in ('repository-settings','repository-review-output'):
     os.environ.update({'REVIEW_REPO_SETTINGS_PRESENT':'true','REVIEW_PR_AGENT_CONFIG_PATH':'.pr_agent.localization.toml'})
@@ -158,7 +166,7 @@ Path('/output/suggestions.json').write_text(json.dumps({'code_suggestions': [{
     'existing_code': 'old = False', 'improved_code': 'old = True',
     'suggestion_content': 'Preserve the existing behavior', 'one_sentence_summary': 'Preserve behavior', 'label': 'bug', 'score': 9,
 }], 'publication_settings': {'committable_code_suggestions': not summarized}}))
-sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else 'scope' if operation in ('provider-settings','stream-scope','named-stream-scope','own-stream-scope','repository-settings') else operation]
+sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else 'scope' if operation in (*stream_scope_operations, 'provider-settings', 'repository-settings') else operation]
 if operation in ('review-output', 'review-output-disabled', 'repository-review-output'):
     sys.argv = ['/tool/bin/pr-agent-native.py', 'generate', '--pr_url', pull['html_url'],
                 '--config-branch', BASE, '--json-output', '/output/review.json', 'review']
@@ -178,7 +186,7 @@ elif operation == 'provider-settings':
     handler = LiteLLMAIHandler()
     assert handler._request_headers['User-Agent'] == 'ReviewRelay-PR-Agent/1.0'
     assert handler._sdk_header_defaults['custom_headers']['x-opencode-session'] == 'reviewrelay-fixture/project-42'
-elif operation == 'own-stream-scope':
+elif operation in ('own-stream-scope', 'visible-stream-scope', 'visible-incremental-stream-scope'):
     scope=json.loads(captured.getvalue().splitlines()[-1])
     assert scope['incremental'] is True and scope['start'] == HEAD, scope
 elif operation in ('scope','stream-scope','named-stream-scope'):

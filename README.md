@@ -41,6 +41,8 @@ For manual reviews of a stacked draft PR, enable `manualDraftReview` and list it
 
 For multiple reviews on one PR, give each additional stream a stable `reviewId` in its trusted orchestration file. Reuse that ID across PRs; omitting it preserves the historical default stream. IDs use lowercase letters and digits with single separating hyphens, up to 64 characters. Different streams have independent native review history, checks, concurrency, artifacts and session continuation.
 
+Named streams display their `reviewId` in both the review body and its reference comment, while retaining the hidden identities used for native incremental review.
+
 Select a separate repository TOML with `prAgentConfigPath` (default `.pr_agent.toml`). This replaces the repository root layer while preserving native host defaults, environment overrides and applicable per-directory settings. A custom file must exist at the frozen base. For an example, adapt [the localization configuration](examples/reviewrelay.localization.json) and provide its trusted instructions and TOML.
 
 [The matrix caller](examples/multi-stream.yml) runs a complete workflow per stream in one run with `fail-fast: false`. Route automatic events and manual commands in the caller; a matrix's single output does not collect all publication URLs. Custom composed callers must pass each stream's own opaque request and artifact IDs, and use its authorization output `concurrency-group` for job concurrency. Generation and publication remain separate permission boundaries. Each caller must satisfy the [workflow trust boundary](#workflow-trust-boundary).

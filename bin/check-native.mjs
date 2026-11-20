@@ -51,6 +51,8 @@ for (const [fixture, operation, replay] of [
     ['adapter_fixture.py', 'stream-scope', false],
     ['adapter_fixture.py', 'named-stream-scope', false],
     ['adapter_fixture.py', 'own-stream-scope', false],
+    ['adapter_fixture.py', 'visible-stream-scope', false],
+    ['adapter_fixture.py', 'visible-incremental-stream-scope', false],
     ['adapter_fixture.py', 'repository-settings', false],
     ['adapter_fixture.py', 'repository-review-output', false],
     ['adapter_fixture.py', 'review-output', false],

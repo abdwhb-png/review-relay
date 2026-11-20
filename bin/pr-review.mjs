@@ -1119,9 +1119,11 @@ function prAgentAttempt(provider, work, prepared, improve = false) {
         !nativeAnchor.trim()
     )
         throw new Error('Incomplete native review Markdown or history anchor.');
-    const marker = reviewIdentity(settings().reviewId).marker;
-    const report = marker ? `${marker}\n\n${body}` : body;
-    const anchor = marker ? `${marker}\n\n${nativeAnchor}` : nativeAnchor;
+    const { reviewId } = settings();
+    const marker = reviewIdentity(reviewId).marker;
+    const prefix = marker ? `${marker}\n**Review stream:** \`${reviewId}\`\n` : '';
+    const report = prefix + body;
+    const anchor = prefix + nativeAnchor;
     if (!report || !Array.isArray(review?.key_issues_to_review) || !coverage) return { ok: false };
     return {
         ok: true,

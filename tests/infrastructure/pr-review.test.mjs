@@ -200,7 +200,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     fs.copyFileSync(input + '/pr.diff', 'pr-agent.diff');
     fs.copyFileSync(input + '/' + process.env.ARTIFACT_PATH, 'pr-agent-input.md');
     fs.writeFileSync(out + '/review.json', JSON.stringify({review:{key_issues_to_review:[], summary:'fixture-gh-token'},coverage:{}}));
-    fs.writeFileSync(out+'/rendered.json',JSON.stringify({...(process.env.FIXTURE_MISSING_NATIVE_BODY ? {} : {body:'PR-Agent report fixture-gh-token'}),anchor:'Native reference'}));
+    fs.writeFileSync(out+'/rendered.json',process.env.FIXTURE_NATIVE_RENDERED || JSON.stringify({...(process.env.FIXTURE_MISSING_NATIVE_BODY ? {} : {body:'PR-Agent report fixture-gh-token'}),anchor:'Native reference'}));
     console.log("Injected artifact context into tools: ['pr_reviewer']");
 }
 `,
@@ -1780,10 +1780,15 @@ await test('named stream artifacts and publication retain their authorized ident
     const manifest = JSON.parse(readFileSync(join(artifact, 'manifest.json'), 'utf8'));
     assert.equal(manifest.schemaVersion, 2);
     assert.equal(manifest.reviewId, 'localization');
+    const nativeAnchor = '## PR Reviewer Guide 🔍\n\n<!-- pr-agent:review:full -->';
     const synthesis = run('synthesize', {
         ...environment,
         REVIEW_ARTIFACT_ID: '70',
         FIXTURE_ARCHIVE_DIR: artifact,
+        FIXTURE_NATIVE_RENDERED: JSON.stringify({
+            body: `${nativeAnchor}\n\nPR-Agent report fixture-gh-token`,
+            anchor: nativeAnchor,
+        }),
     });
     assert.equal(synthesis.status, 0, synthesis.stderr);
     const reports = outputs().reports;
@@ -1806,14 +1811,82 @@ await test('named stream artifacts and publication retain their authorized ident
         REVIEW_PROVIDER_ENV: '{}',
     });
     assert.equal(published.status, 0, published.stderr);
-    assert.match(
-        JSON.parse(read('published')).body,
-        /^<!-- reviewrelay:stream:localization -->\n\nPR-Agent report/,
-    );
-    assert.match(
-        JSON.parse(read('reference')).body,
-        /^<!-- reviewrelay:stream:localization -->\n\nNative reference/,
-    );
+    const reviewBody = JSON.parse(read('published')).body;
+    const referenceBody = JSON.parse(read('reference')).body;
+    for (const body of [reviewBody, referenceBody]) {
+        assert.deepEqual(body.split('\n').slice(0, 5), [
+            '<!-- reviewrelay:stream:localization -->',
+            '**Review stream:** `localization`',
+            '## PR Reviewer Guide 🔍',
+            '',
+            '<!-- pr-agent:review:full -->',
+        ]);
+    }
+    const archived = readFileSync(join(reports, 'pr-agent-review.md'), 'utf8').trimEnd();
+    const publicationId = /<!-- reviewrelay:[a-f0-9]{64} -->$/.exec(reviewBody)?.[0];
+    assert.ok(publicationId);
+    assert.equal(reviewBody, `${archived}\n\n${publicationId}`);
+    assert.ok(referenceBody.includes(publicationId));
+    const replay = run('publish', {
+        ...environment,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: reports,
+        REVIEW_PROVIDER_ENV: '{}',
+    });
+    assert.equal(replay.status, 0, replay.stderr);
+    assert.equal(read('published').trim().split('\n').length, 1);
+    assert.equal(read('reference-calls'), '1');
+});
+
+await test('named stream publication limits include its visible label and archive marker in UTF-8 bytes', async (t) => {
+    for (const excess of [0, 1]) {
+        await t.test(
+            excess ? 'rejects 65537 bytes before publication' : 'publishes exactly 65536 bytes',
+            (t) => {
+                const reviewId = 'a'.repeat(64);
+                const { run, outputs, read, fixture } = reviewFixture(t, {
+                    files: { '.reviewrelay.json': JSON.stringify({ reviewId }) },
+                });
+                assert.equal(run('analyze').status, 0);
+                const prefix = `<!-- reviewrelay:stream:${reviewId} -->\n**Review stream:** \`${reviewId}\`\n`;
+                const nativeAnchor = '## PR Reviewer Guide 🔍\n\n<!-- pr-agent:review:full -->';
+                const publicationSuffix = `\n\n<!-- reviewrelay:${'a'.repeat(64)} -->`;
+                const remaining =
+                    65536 +
+                    excess -
+                    Buffer.byteLength(prefix + nativeAnchor + '\n\n' + publicationSuffix);
+                const nativeBody =
+                    nativeAnchor +
+                    '\n\n' +
+                    'é'.repeat(Math.floor(remaining / 2)) +
+                    'x'.repeat(remaining % 2);
+                const synthesized = run('synthesize', {
+                    OPENCODE_REPORT_DIR: outputs().reports,
+                    FIXTURE_NATIVE_RENDERED: JSON.stringify({
+                        body: nativeBody,
+                        anchor: nativeAnchor,
+                    }),
+                });
+                assert.equal(synthesized.status, 0, synthesized.stderr);
+                const reports = outputs().reports;
+                const archived = readFileSync(
+                    join(reports, 'pr-agent-review.md'),
+                    'utf8',
+                ).trimEnd();
+                assert.equal(Buffer.byteLength(archived + publicationSuffix), 65536 + excess);
+                const published = run('publish', { REVIEW_REPORT_DIR: reports });
+                if (excess) {
+                    assert.equal(published.status, 1);
+                    assert.match(published.stderr, /exceeds the GitHub publication limit/);
+                    assert.ok(!readdirSync(fixture).includes('published'));
+                    assert.ok(!readdirSync(fixture).includes('reference'));
+                } else {
+                    assert.equal(published.status, 0, published.stderr);
+                    assert.equal(Buffer.byteLength(JSON.parse(read('published')).body), 65536);
+                }
+            },
+        );
+    }
 });
 
 await test('a completed stream resumes its session from a globally failed run', (t) => {
