@@ -4,6 +4,12 @@ inputs:
     operation:
         description: authorize, analyze, synthesize, improve, publish, or finish
         required: true
+    review-commands:
+        description: JSON array of caller review commands; empty input retains legacy defaults only when both command inputs are omitted
+        default: ''
+    improve-commands:
+        description: JSON array of caller suggestion commands; an omitted list is disabled when either command input is set
+        default: ''
     request:
         description: Frozen request returned by authorize
         default: ''
@@ -56,6 +62,8 @@ runs:
               TOOL_ACTION_PATH: ${{ github.action_path }}
               REVIEW_OPERATION: ${{ inputs.operation }}
               REVIEW_REQUEST: ${{ inputs.request }}
+              REVIEW_REVIEW_COMMANDS: ${{ inputs.review-commands }}
+              REVIEW_IMPROVE_COMMANDS: ${{ inputs.improve-commands }}
           run: node "$TOOL_ACTION_PATH/../bin/action.mjs" prepare
         - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
           with:
@@ -75,6 +83,8 @@ runs:
               REVIEW_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
               REVIEW_OPERATION: ${{ inputs.operation }}
               REVIEW_REQUEST: ${{ inputs.request }}
+              REVIEW_REVIEW_COMMANDS: ${{ inputs.review-commands }}
+              REVIEW_IMPROVE_COMMANDS: ${{ inputs.improve-commands }}
               REVIEW_ARTIFACT_ID: ${{ inputs.artifact-id }}
               REVIEW_CONFIG_PATH: ${{ inputs.config-path }}
               REVIEW_OVERRIDES: ${{ inputs.overrides }}

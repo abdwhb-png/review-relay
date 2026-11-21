@@ -2,7 +2,12 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { configurationDigest } from './artifacts.mjs';
-import { loadConfiguration, repositoryPath, reviewIdentity } from './configuration.mjs';
+import {
+    commentCommands,
+    loadConfiguration,
+    repositoryPath,
+    reviewIdentity,
+} from './configuration.mjs';
 import { reviewRequest, requestSchemaVersion } from './pr-review.mjs';
 
 const operations = ['authorize', 'analyze', 'synthesize', 'improve', 'publish', 'finish'];
@@ -10,6 +15,7 @@ const operations = ['authorize', 'analyze', 'synthesize', 'improve', 'publish', 
 try {
     const env = { ...process.env };
     const operation = env.REVIEW_OPERATION;
+    const commands = commentCommands(env);
     if (env.GITHUB_SERVER_URL !== 'https://github.com')
         throw new Error('ReviewRelay v1 supports GitHub.com only.');
     env.GH_HOST = 'github.com';
@@ -42,6 +48,7 @@ try {
             env.GITHUB_EVENT_NAME,
             JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')),
             true,
+            commands,
         );
         if (
             !eventRequest ||
@@ -96,7 +103,7 @@ try {
             configurationDigest(loadConfiguration(env)) !== env.REVIEW_EXPECTED_CONFIG
         )
             throw new Error(
-                'Configuration changed after request authorization. Start a new /review.',
+                'Configuration changed after request authorization. Start a new request.',
             );
         if (operation === 'finish') {
             const results = JSON.parse(env.REVIEW_RESULTS || '{}');
