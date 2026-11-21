@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.2.0:** compose independent review streams across separate callers, reusable-workflow matrices or action chains within the documented [workflow trust boundary](#workflow-trust-boundary). See [qualification](docs/qualification.md) for the evidence and boundaries.
+**Version 1.3.0:** route project-specific comment commands to independent review streams across separate callers, reusable-workflow matrices or action chains. Named streams identify themselves in published reviews and references. Keep the documented [workflow trust boundary](#workflow-trust-boundary); see [qualification](docs/qualification.md) for the evidence and boundaries.
 
 ## Agent skill
 
