@@ -3,7 +3,7 @@ name: review-relay
 description: Use when adopting, configuring, operating, upgrading, or troubleshooting ReviewRelay in a GitHub repository. Do not use for general code review or ReviewRelay engine development.
 license: Apache-2.0
 metadata:
-    version: '1.2.0'
+    version: '1.3.0'
 ---
 
 # ReviewRelay
@@ -32,6 +32,16 @@ For an existing installation, inspect its pinned revision first. For a new insta
 
 Treat those version-matched files as the interface and configuration authority. Do not copy configuration catalogs into project documentation, guess unsupported settings, or silently track a moving branch.
 
+### Usage references
+
+Use these links to locate the upstream files even when this skill is installed in another project. Replace `main` in each URL with the selected full commit SHA before applying its guidance; use only capabilities documented at that revision.
+
+- [Usage, configuration, commands and recovery](https://github.com/abdwhb-png/review-relay/blob/main/README.md).
+- [Complete reusable-workflow caller](https://github.com/abdwhb-png/review-relay/blob/main/examples/workflow.yml).
+- [Composed action operations](https://github.com/abdwhb-png/review-relay/blob/main/examples/composed.yml).
+- [Multiple streams and caller-specific commands](https://github.com/abdwhb-png/review-relay/blob/main/examples/multi-stream.yml).
+- [Qualification evidence and release boundaries](https://github.com/abdwhb-png/review-relay/blob/main/docs/qualification.md).
+
 ## 3. Configure the project
 
 Keep orchestration settings in ReviewRelay's supported project configuration and engine settings in native OpenCode JSON/JSONC and PR-Agent TOML. Preserve existing settings and use only the changes the project needs.
@@ -54,6 +64,8 @@ Configure provider credentials through existing Actions secrets or another autho
 
 Preserve read-only generation and a separate publisher without model credentials. Read instructions and configuration from trusted revisions, and never execute reviewed PR code.
 
+For project-specific comment commands, use the selected version's `review-commands` and `improve-commands` caller inputs when supported. Declare trusted lists once and pass the same values to every composed operation. Setting either list replaces the default comment commands; omitted lists then disable their operation. Check exact routing and negative cases before activation, including unknown commands and unauthorized users.
+
 ## 5. Validate and activate
 
 Inspect the resulting diff and run the project's available focused workflow/configuration checks. Verify the SHA, supported inputs, secret references, permissions, event routing and instruction sources. Static checks do not establish a working hosted review.
@@ -64,7 +76,7 @@ For an authorized live check, use an eligible same-repository PR and request one
 
 ## 6. Operate and recover
 
-Use standalone /review or /improve comments from a user with current write, maintain or admin permission, or manual dispatch from the default branch with its PR-number input.
+Use the caller's configured comment commands (default /review and /improve) from a user with current write, maintain or admin permission, or manual dispatch from the default branch with its PR-number input.
 
 After additional commits, request a new review to use native incremental review and compatible archived session continuation. A no-new-changes result should invoke no model.
 

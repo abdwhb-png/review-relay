@@ -15,6 +15,32 @@ const defaults = {
     instructionSources: [],
 };
 
+export function commentCommands(env = process.env) {
+    const values = [env.REVIEW_REVIEW_COMMANDS || '', env.REVIEW_IMPROVE_COMMANDS || ''];
+    const custom = values.some((value) => value !== '');
+    const commands = new Map();
+    for (const [index, operation] of ['review', 'improve'].entries()) {
+        let names;
+        try {
+            names = custom ? JSON.parse(values[index] || '[]') : [`/${operation}`];
+        } catch {
+            throw new Error(`Invalid ${operation}-commands: expected a JSON array.`);
+        }
+        if (!Array.isArray(names))
+            throw new Error(`Invalid ${operation}-commands: expected a JSON array.`);
+        for (const name of names) {
+            if (typeof name !== 'string' || !/^\/[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name))
+                throw new Error(
+                    `Invalid ${operation}-commands: expected slash command names without arguments.`,
+                );
+            if (commands.has(name))
+                throw new Error(`Duplicate command in caller command lists: ${name}`);
+            commands.set(name, operation);
+        }
+    }
+    return commands;
+}
+
 export function reviewIdentity(reviewId, env = process.env) {
     if (
         reviewId !== null &&

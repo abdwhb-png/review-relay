@@ -49,6 +49,25 @@ Select a separate repository TOML with `prAgentConfigPath` (default `.pr_agent.t
 
 All participating callers must use the lane-capable version. Opaque requests and manifests now use format 2; configuration remains schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
 
+## Caller-specific comment commands
+
+The reusable workflow and action accept `review-commands` and `improve-commands` as JSON arrays of literal comment commands. Each list starts that caller's own review or suggestion lifecycle with its selected configuration and `reviewId`.
+
+```yaml
+with:
+    config-path: .reviewrelay.localization.json
+    review-commands: '["/review-localization", "/review-fr"]'
+    improve-commands: '["/improve-localization"]'
+```
+
+Omitting both inputs preserves `/review` and `/improve`. Setting either input replaces the complete comment-command policy: an omitted or empty list disables that operation's comment commands. `[]` is an explicit empty list; an empty input means omitted. Automatic events and manual dispatch remain independent of these lists.
+
+Names must match `/[A-Za-z0-9][A-Za-z0-9_-]*` as a complete command. Matching is case-sensitive and permits trailing whitespace, including a final line break, but no arguments or additional text. Invalid JSON, non-string entries, malformed names and duplicate names within or across lists fail before inference or publication. Unknown commands receive no acknowledgement and start no model.
+
+Pass the same trusted lists to every composed operation. Each operation revalidates the original GitHub event against those lists; changing the selected command's routing or forging the request is rejected. Define the lists from trusted caller configuration, never from PR content or the comment itself. The [composed example](examples/composed.yml) uses scalar YAML anchors to declare each list once; the [matrix example](examples/multi-stream.yml) gives each stream its own lists.
+
+With custom lists the supplied workflow prefilters slash-prefixed comments, then validates exact commands in `authorize`. An unknown slash command can therefore start an authorization job without analysis or publication. The caller can add a narrower event filter. The composed example uses this coarse prefilter too. With default inputs the supplied workflow retains its historical `/review` and `/improve` prefilter.
+
 ## Configure the native engines
 
 Keep OpenCode JSON/JSONC and PR-Agent TOML in their native formats. The bundled profiles preserve the initial Go / DeepSeek V4.1 Flash / high behavior, including its existing timeout and token settings, as overridable defaults. Models, endpoints, effort, budgets, instructions, presentation, and supported provider credentials remain native settings. ReviewRelay has no renamed model or budget catalog. Native PR-Agent presentation settings, including `config.output_run_details`, are preserved from its complete dry-run Markdown through isolated publication.
@@ -101,7 +120,7 @@ Reports and native session exports stay in consumer Actions artifacts. They can 
 
 Operations download artifacts by ID and verify GitHub producer metadata, consumer identity, schema, exact engine/runtime compatibility, effective configuration fingerprint, frozen revision, native scope, reconstructed diff, and payload checksums. Callers never handle OpenCode's internal session storage. Unknown formats and expired, corrupt, incompatible, or wrong-producer artifacts fail explicitly.
 
-Use **Re-run failed jobs** on the same Actions run to reuse a completed analysis after synthesis failure. Changed revisions or analysis configuration require a new request. A new `/review` uses PR-Agent's native incremental boundary and imports a compatible archived native OpenCode session. No new changes invokes no model. Missing, expired, or incompatible history starts a complete review with an explicit summary; corrupt compatible context blocks. Artifacts from the pre-extraction implementation are not imported. Engine compatibility is conservative: changes to the recorded engine sources, native profiles, or runtime pins require fresh context.
+Use **Re-run failed jobs** on the same Actions run to reuse a completed analysis after synthesis failure. Changed revisions or analysis configuration require a new request. A new review request uses PR-Agent's native incremental boundary and imports a compatible archived native OpenCode session. No new changes invokes no model. Missing, expired, or incompatible history starts a complete review with an explicit summary; corrupt compatible context blocks. Artifacts from the pre-extraction implementation are not imported. Engine compatibility is conservative: changes to the recorded engine sources, native profiles, or runtime pins require fresh context.
 
 Publication verifies the live revision, writes the review on the frozen head, and checks again before adding the native history reference. A concurrent PR update can therefore fail a run after a correctly anchored review already exists. Retries reconcile hidden archive-bound markers before creating another review, reference, or suggestion. Partial publication remains a failure until its missing effects are confirmed; inference is not repeated to repair publication.
 

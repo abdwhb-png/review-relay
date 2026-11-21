@@ -5,6 +5,12 @@ on:
             config-path:
                 type: string
                 default: .reviewrelay.json
+            review-commands:
+                type: string
+                default: ''
+            improve-commands:
+                type: string
+                default: ''
             overrides:
                 type: string
                 default: '{}'
@@ -22,7 +28,9 @@ jobs:
             (github.event_name == 'pull_request_target' && !github.event.pull_request.draft) ||
             (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
             github.event.sender.type == 'User' &&
-            (startsWith(github.event.comment.body, '/review') || startsWith(github.event.comment.body, '/improve')))
+            (((inputs['review-commands'] != '' || inputs['improve-commands'] != '') && startsWith(github.event.comment.body, '/')) ||
+            (inputs['review-commands'] == '' && inputs['improve-commands'] == '' &&
+            (startsWith(github.event.comment.body, '/review') || startsWith(github.event.comment.body, '/improve')))))
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -43,6 +51,8 @@ jobs:
                   operation: authorize
                   config-path: ${{ inputs.config-path }}
                   overrides: ${{ inputs.overrides }}
+                  review-commands: ${{ inputs.review-commands }}
+                  improve-commands: ${{ inputs.improve-commands }}
                   provider-env: ${{ secrets.provider-env || '{}' }}
     analyze:
         needs: request
@@ -70,6 +80,8 @@ jobs:
                   request: ${{ needs.request.outputs.request }}
                   config-path: ${{ inputs.config-path }}
                   overrides: ${{ inputs.overrides }}
+                  review-commands: ${{ inputs.review-commands }}
+                  improve-commands: ${{ inputs.improve-commands }}
                   provider-env: ${{ secrets.provider-env || '{}' }}
     synthesize:
         needs: [request, analyze]
@@ -96,6 +108,8 @@ jobs:
                   artifact-id: ${{ needs.analyze.outputs.artifact-id }}
                   config-path: ${{ inputs.config-path }}
                   overrides: ${{ inputs.overrides }}
+                  review-commands: ${{ inputs.review-commands }}
+                  improve-commands: ${{ inputs.improve-commands }}
                   provider-env: ${{ secrets.provider-env || '{}' }}
     improve:
         needs: request
@@ -118,6 +132,8 @@ jobs:
                   request: ${{ needs.request.outputs.request }}
                   config-path: ${{ inputs.config-path }}
                   overrides: ${{ inputs.overrides }}
+                  review-commands: ${{ inputs.review-commands }}
+                  improve-commands: ${{ inputs.improve-commands }}
                   provider-env: ${{ secrets.provider-env || '{}' }}
     publish:
         needs: [request, synthesize, improve]
@@ -145,6 +161,8 @@ jobs:
                   artifact-id: ${{ needs.synthesize.outputs.artifact-id || needs.improve.outputs.artifact-id }}
                   config-path: ${{ inputs.config-path }}
                   overrides: ${{ inputs.overrides }}
+                  review-commands: ${{ inputs.review-commands }}
+                  improve-commands: ${{ inputs.improve-commands }}
     finish:
         needs: [request, analyze, synthesize, improve, publish]
         if: always() && needs.request.outputs.allowed == 'true'
@@ -162,6 +180,8 @@ jobs:
                   request: ${{ needs.request.outputs.request }}
                   config-path: ${{ inputs.config-path }}
                   overrides: ${{ inputs.overrides }}
+                  review-commands: ${{ inputs.review-commands }}
+                  improve-commands: ${{ inputs.improve-commands }}
                   results: >-
                       {"analyze":"${{ needs.analyze.result }}","synthesize":"${{ needs.synthesize.result }}",
                       "improve":"${{ needs.improve.result }}","publish":"${{ needs.publish.result }}",

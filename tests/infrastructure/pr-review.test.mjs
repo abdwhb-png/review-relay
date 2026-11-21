@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { pullRevision } from '../../bin/github-actions.mjs';
-import { credentialName } from '../../bin/configuration.mjs';
+import { commentCommands, credentialName } from '../../bin/configuration.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -211,7 +211,10 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
         return spawnSync(
             process.execPath,
             overrides.FIXTURE_ACTION
-                ? [fileURLToPath(new URL('../../bin/action.mjs', import.meta.url)), 'run']
+                ? [
+                      fileURLToPath(new URL('../../bin/action.mjs', import.meta.url)),
+                      overrides.FIXTURE_PREPARE ? 'prepare' : 'run',
+                  ]
                 : [fileURLToPath(new URL('../../bin/pr-review.mjs', import.meta.url)), command],
             {
                 cwd: fixture,
@@ -346,22 +349,22 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
 
     const missing = synthesize({ OPENCODE_REPORT_DIR: join(fixture, 'expired') });
     assert.equal(missing.status, 1);
-    assert.match(missing.stderr, /Start a new \/review/);
+    assert.match(missing.stderr, /Start a new request/);
     assert.equal(outputs().state, 'new-review-required');
 
     writeFileSync(reportPath, 'Corrupted report\n');
     const corrupt = synthesize();
     assert.equal(corrupt.status, 1);
-    assert.match(corrupt.stderr, /Start a new \/review/);
+    assert.match(corrupt.stderr, /Start a new request/);
     writeFileSync(reportPath, report);
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, globs: ['app.*'] }));
     const wrongDiff = synthesize();
     assert.equal(wrongDiff.status, 1);
-    assert.match(wrongDiff.stderr, /Start a new \/review/);
+    assert.match(wrongDiff.stderr, /Start a new request/);
     writeFileSync(manifestPath, JSON.stringify({ ...manifest, number: 43 }));
     const wrongPull = synthesize();
     assert.equal(wrongPull.status, 1);
-    assert.match(wrongPull.stderr, /Start a new \/review/);
+    assert.match(wrongPull.stderr, /Start a new request/);
     writeFileSync(manifestPath, JSON.stringify(manifest));
 
     const stale = synthesize({
@@ -371,7 +374,7 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
         }),
     });
     assert.equal(stale.status, 1);
-    assert.match(stale.stderr, /revision or eligibility changed.*Start a new \/review/);
+    assert.match(stale.stderr, /revision or eligibility changed.*Start a new request/);
     assert.equal(read('provider-calls'), 'opencode\n');
 
     const quota = synthesize({
@@ -866,19 +869,20 @@ else console.log(process.env.FIXTURE_PULL);
     assert.equal(readFileSync(calls, 'utf8'), `repos/${repo}/pulls/42\n`);
 });
 
-await test('the review workflow starts a runner only for its own slash commands', () => {
+await test('the review workflow retains legacy filtering and prefilters custom caller commands', () => {
     const workflow = readFileSync(
         new URL('../../.github/workflows/review.yml', import.meta.url),
         'utf8',
     );
     const expression = workflow.match(/\s+request:\n\s+if: >-\n([\s\S]*?)\n\s+runs-on:/)[1].trim();
-    const eligible = (body) =>
+    const eligible = (body, commands = {}) =>
         runInNewContext(expression, {
             github: {
                 event_name: 'issue_comment',
                 event: { issue: { pull_request: {} }, sender: { type: 'User' }, comment: { body } },
             },
             vars: {},
+            inputs: { 'review-commands': '', 'improve-commands': '', ...commands },
             startsWith: (text, prefix) => text.startsWith(prefix),
         });
     assert.equal(eligible('/ci'), false);
@@ -886,6 +890,10 @@ await test('the review workflow starts a runner only for its own slash commands'
     assert.equal(eligible('/review'), true);
     assert.equal(eligible('/review\r\n'), true);
     assert.equal(eligible('/improve\n'), true);
+    const custom = { 'review-commands': '["/check-fr"]' };
+    assert.equal(eligible('/check-fr', custom), true);
+    assert.equal(eligible('ordinary comment', custom), false);
+    assert.equal(eligible('/unknown', custom), true);
 });
 
 await test('a differently laid out project uses trusted custom guidance and its configured target branch', (t) => {
@@ -1996,4 +2004,143 @@ await test('a named stream refuses incomplete native Markdown before archival', 
     });
     assert.equal(result.status, 1);
     assert.equal(outputs().reports, undefined);
+});
+
+await test('caller command lists authorize aliases and preserve routing through publication', (t) => {
+    const { run, outputs, write, read } = reviewFixture(t, {
+        files: { '.reviewrelay.json': JSON.stringify({ reviewId: 'localization' }) },
+    });
+    const policy = {
+        FIXTURE_ACTION: 'true',
+        REVIEW_REVIEW_COMMANDS: '["/review-localization","/review-fr"]',
+        REVIEW_IMPROVE_COMMANDS: '["/improve-localization"]',
+    };
+    for (const body of [
+        '/review',
+        '/improve',
+        '/unknown',
+        '/review-fr more',
+        '/REVIEW-FR',
+        '/review-fr\nmore',
+    ]) {
+        write('event.json', JSON.stringify({ ...manual, comment: { id: 123, body } }));
+        assert.equal(run('authorize', policy).status, 0);
+        assert.equal(outputs().allowed, undefined);
+    }
+    for (const body of ['/review-localization', '/review-fr\r\n']) {
+        write('event.json', JSON.stringify({ ...manual, comment: { id: 123, body } }));
+        assert.equal(run('authorize', policy).status, 0);
+        assert.equal(JSON.parse(outputs().request).command, 'review');
+    }
+    const request = outputs().request;
+    const env = { ...policy, REVIEW_REQUEST: request };
+    const forged = run('improve', {
+        ...env,
+        REVIEW_REQUEST: JSON.stringify({ ...JSON.parse(request), command: 'improve' }),
+    });
+    assert.equal(forged.status, 1);
+    assert.match(forged.stderr, /original GitHub event/);
+    const denied = run('analyze', { ...env, FIXTURE_PERMISSION: 'read' });
+    assert.equal(denied.status, 1);
+    const wrong = run('analyze', {
+        ...env,
+        REVIEW_REVIEW_COMMANDS: '[]',
+        REVIEW_IMPROVE_COMMANDS: '["/review-fr"]',
+    });
+    assert.equal(wrong.status, 1);
+    assert.match(wrong.stderr, /original GitHub event/);
+    assert.equal(run('analyze', env).status, 0);
+    const analysis = outputs().reports;
+    const synthesis = run('synthesize', {
+        ...env,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: analysis,
+    });
+    assert.equal(synthesis.status, 0, synthesis.stderr);
+    assert.equal(JSON.parse(read('native-arguments')).at(-1), 'review');
+    const reports = outputs().reports;
+    const wrongPublisher = run('publish', {
+        ...env,
+        REVIEW_REVIEW_COMMANDS: '["/different"]',
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: reports,
+        REVIEW_PROVIDER_ENV: '{}',
+    });
+    assert.equal(wrongPublisher.status, 1);
+    assert.match(wrongPublisher.stderr, /original GitHub event/);
+    const published = run('publish', {
+        ...env,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: reports,
+        REVIEW_PROVIDER_ENV: '{}',
+    });
+    assert.equal(published.status, 0, published.stderr);
+    assert.match(JSON.parse(read('published')).body, /reviewrelay:stream:localization/);
+    assert.equal(read('provider-calls'), 'opencode\npr-agent\n');
+    write(
+        'event.json',
+        JSON.stringify({ ...manual, comment: { id: 124, body: '/improve-localization' } }),
+    );
+    assert.equal(run('authorize', policy).status, 0);
+    const improve = { ...policy, REVIEW_REQUEST: outputs().request };
+    assert.equal(JSON.parse(improve.REVIEW_REQUEST).command, 'improve');
+    assert.equal(run('analyze', improve).status, 1);
+    assert.equal(run('improve', improve).status, 0);
+    assert.equal(JSON.parse(read('native-arguments')).at(-1), 'improve');
+    const suggestions = outputs().reports;
+    const sent = run('publish', {
+        ...improve,
+        REVIEW_ARTIFACT_ID: '70',
+        FIXTURE_ARCHIVE_DIR: suggestions,
+        REVIEW_PROVIDER_ENV: '{}',
+    });
+    assert.equal(sent.status, 0, sent.stderr);
+    assert.equal(outputs().state, 'published');
+});
+
+await test('invalid or disabled caller command lists cannot authorize inference', (t) => {
+    const { run, outputs, fixture, write } = reviewFixture(t);
+    for (const policy of [
+        { REVIEW_REVIEW_COMMANDS: 'not-json' },
+        { REVIEW_REVIEW_COMMANDS: '{}' },
+        { REVIEW_REVIEW_COMMANDS: '[1]' },
+        { REVIEW_REVIEW_COMMANDS: '["review"]' },
+        { REVIEW_REVIEW_COMMANDS: '["/review more"]' },
+        { REVIEW_REVIEW_COMMANDS: '["/review\\n"]' },
+        { REVIEW_REVIEW_COMMANDS: '["/same","/same"]' },
+        { REVIEW_REVIEW_COMMANDS: '["/same"]', REVIEW_IMPROVE_COMMANDS: '["/same"]' },
+        { REVIEW_IMPROVE_COMMANDS: 'null' },
+    ]) {
+        const result = run('authorize', { FIXTURE_ACTION: 'true', ...policy });
+        assert.equal(result.status, 1, JSON.stringify(policy));
+        assert.match(result.stderr, /command/i);
+        assert.equal(outputs().allowed, undefined);
+    }
+    for (const policy of [
+        { REVIEW_REVIEW_COMMANDS: '[]' },
+        { REVIEW_IMPROVE_COMMANDS: '["/suggest"]' },
+    ]) {
+        write('event.json', JSON.stringify({ ...manual, comment: { id: 123, body: '/review' } }));
+        assert.equal(run('authorize', { FIXTURE_ACTION: 'true', ...policy }).status, 0);
+        assert.equal(outputs().allowed, undefined);
+    }
+    const prepare = run('authorize', {
+        FIXTURE_ACTION: 'true',
+        FIXTURE_PREPARE: 'true',
+        REVIEW_REVIEW_COMMANDS: '{}',
+    });
+    assert.equal(prepare.status, 1);
+    assert.match(prepare.stderr, /review-commands/);
+    const noComments = commentCommands({ REVIEW_REVIEW_COMMANDS: '[]' });
+    assert.deepEqual(
+        reviewRequest('workflow_dispatch', { inputs: { pull_request: '42' } }, true, noComments),
+        { number: 42, command: 'review', manual: true },
+    );
+    assert.deepEqual(reviewRequest('pull_request_target', automatic, true, noComments), {
+        number: 42,
+        command: 'review',
+        manual: false,
+    });
+    assert.ok(!readdirSync(fixture).includes('provider-calls'));
+    assert.ok(!readdirSync(fixture).includes('published'));
 });

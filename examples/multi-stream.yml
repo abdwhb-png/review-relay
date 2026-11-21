@@ -1,5 +1,9 @@
 name: Independent review streams
 on:
+    issue_comment:
+        types: [created]
+    pull_request_target:
+        types: [opened, reopened, ready_for_review, synchronize]
     workflow_dispatch:
         inputs:
             pull_request:
@@ -12,7 +16,13 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                config: [.reviewrelay.json, .reviewrelay.localization.json]
+                include:
+                    - config: .reviewrelay.json
+                      review-commands: '["/review"]'
+                      improve-commands: '["/improve"]'
+                    - config: .reviewrelay.localization.json
+                      review-commands: '["/review-localization", "/review-fr"]'
+                      improve-commands: '["/improve-localization"]'
         permissions:
             contents: read
             actions: read
@@ -21,5 +31,7 @@ jobs:
         uses: abdwhb-png/review-relay/.github/workflows/review.yml@REVIEWRELAY_SHA
         with:
             config-path: ${{ matrix.config }}
+            review-commands: ${{ matrix.review-commands }}
+            improve-commands: ${{ matrix.improve-commands }}
         secrets:
             provider-env: ${{ secrets.REVIEWRELAY_PROVIDER_ENV }}

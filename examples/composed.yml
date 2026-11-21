@@ -18,7 +18,7 @@ jobs:
             (github.event_name == 'pull_request_target' && !github.event.pull_request.draft) ||
             (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
             github.event.sender.type == 'User' &&
-            (startsWith(github.event.comment.body, '/review') || startsWith(github.event.comment.body, '/improve')))
+            startsWith(github.event.comment.body, '/'))
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -36,6 +36,8 @@ jobs:
             - uses: &reviewrelay abdwhb-png/review-relay/action@REVIEWRELAY_SHA
               id: request
               with:
+                  review-commands: &review-commands ''
+                  improve-commands: &improve-commands ''
                   operation: authorize
                   provider-env: ${{ secrets.REVIEWRELAY_PROVIDER_ENV || '{}' }}
     analyze:
@@ -60,6 +62,8 @@ jobs:
             - uses: *reviewrelay
               id: analysis
               with:
+                  review-commands: *review-commands
+                  improve-commands: *improve-commands
                   operation: analyze
                   request: ${{ needs.request.outputs.request }}
                   provider-env: ${{ secrets.REVIEWRELAY_PROVIDER_ENV || '{}' }}
@@ -83,6 +87,8 @@ jobs:
             - uses: *reviewrelay
               id: synthesis
               with:
+                  review-commands: *review-commands
+                  improve-commands: *improve-commands
                   operation: synthesize
                   request: ${{ needs.request.outputs.request }}
                   artifact-id: ${{ needs.analyze.outputs.artifact-id }}
@@ -104,6 +110,8 @@ jobs:
             - uses: *reviewrelay
               id: suggestions
               with:
+                  review-commands: *review-commands
+                  improve-commands: *improve-commands
                   operation: improve
                   request: ${{ needs.request.outputs.request }}
                   provider-env: ${{ secrets.REVIEWRELAY_PROVIDER_ENV || '{}' }}
@@ -128,6 +136,8 @@ jobs:
             - uses: *reviewrelay
               id: publish
               with:
+                  review-commands: *review-commands
+                  improve-commands: *improve-commands
                   operation: publish
                   request: ${{ needs.request.outputs.request }}
                   artifact-id: ${{ needs.synthesize.outputs.artifact-id || needs.improve.outputs.artifact-id }}
@@ -144,6 +154,8 @@ jobs:
                   node-version: '24'
             - uses: *reviewrelay
               with:
+                  review-commands: *review-commands
+                  improve-commands: *improve-commands
                   operation: finish
                   request: ${{ needs.request.outputs.request }}
                   results: >-
