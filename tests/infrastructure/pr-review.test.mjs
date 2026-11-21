@@ -1,3 +1,4 @@
+import { runtime } from '../../bin/artifacts.mjs';
 import assert from 'node:assert/strict';
 import { pullRevision } from '../../bin/github-actions.mjs';
 import { commentCommands, credentialName } from '../../bin/configuration.mjs';
@@ -306,7 +307,7 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
     const { producer, compatibility, configurationSha256, ...payload } = manifest;
     assert.equal(producer.runId, '900');
     assert.equal(producer.workflowSha, baseSha);
-    assert.equal(compatibility.version, '1.2.0');
+    assert.equal(compatibility.version, runtime.version);
     assert.match(compatibility.engine, /^[a-f0-9]{64}$/);
     assert.match(configurationSha256, /^[a-f0-9]{64}$/);
     assert.deepEqual(payload, {
