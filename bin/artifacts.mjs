@@ -176,14 +176,20 @@ export function workflowPath() {
     return path;
 }
 
-export function downloadArtifact(id, work) {
+export function downloadArtifact(id, work, metadata) {
     if (!/^[1-9][0-9]*$/.test(String(id))) throw new Error('Invalid artifact ID.');
     const env = process.env;
     const endpoint = `repos/${env.GITHUB_REPOSITORY}/actions/artifacts/${id}`;
-    const artifact = api(endpoint);
-    const run = api(`repos/${env.GITHUB_REPOSITORY}/actions/runs/${artifact.workflow_run?.id}`);
+    const artifact = metadata ? metadata.artifact : api(endpoint);
+    const run = metadata
+        ? metadata.run
+        : api(`repos/${env.GITHUB_REPOSITORY}/actions/runs/${artifact.workflow_run?.id}`);
     if (
+        !artifact ||
+        !run ||
         String(artifact.id) !== String(id) ||
+        !Number.isSafeInteger(run.id) ||
+        run.id !== artifact.workflow_run?.id ||
         artifact.expired ||
         !['pull_request_target', 'issue_comment', 'workflow_dispatch'].includes(run.event) ||
         run.path?.split('@')[0] !== workflowPath() ||

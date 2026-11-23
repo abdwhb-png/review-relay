@@ -3,7 +3,7 @@ name: review-relay
 description: Use when adopting, configuring, operating, upgrading, or troubleshooting ReviewRelay in a GitHub repository. Do not use for general code review or ReviewRelay engine development.
 license: Apache-2.0
 metadata:
-    version: '1.3.0'
+    version: '1.3.1'
 ---
 
 # ReviewRelay
@@ -51,6 +51,18 @@ Select trusted instruction files or globs from the project, including its existi
 Keep automatic review and provider fallback explicitly controlled. Enable manual draft review or additional target branches only when needed. Use native presentation settings for output such as Agent run details.
 
 For multiple streams, preserve each stable reviewId and select its trusted native TOML with prAgentConfigPath when needed. Read the chosen version's multi-stream examples. Keep each authorized request and artifact ID attached to its stream; consume the returned concurrency-group rather than inventing names. In a matrix, use fail-fast: false and account for GitHub's output aggregation rules. A globally failed producer run does not by itself invalidate a completed stream's verified context.
+
+### Keep the review focused and measurable
+
+Avoid paying for two differently scoped reviews. Define the intended findings and exclusions in trusted project instructions and ensure both native engines receive that mission. A reviewId isolates history and sessions; it does not specialize the analysis. PR-Agent extra_instructions alone does not constrain OpenCode. Use the selected version's native instruction and context mechanisms, then inspect the archived OpenCode report to confirm its actual scope before enabling automatic runs.
+
+Choose exclusions from the review's responsibility, preserving supporting source and relevant cross-file changes. excludeGlobs filters the primary diff; excluded files can remain inspection context, and checkout size does not necessarily shrink. Keep specialized and general streams distinct rather than running duplicate general reviews under different names.
+
+Compare settings separately for analysis and synthesis using native configuration. Preserve established providers and model settings until a controlled comparison justifies changing them. High reasoning is a starting profile, not a universal quality requirement. Avoid arbitrary token or step ceilings that truncate an otherwise valid review.
+
+Measure equivalent frozen revisions and distinguish fresh reviews from incremental continuations. Record setup, analysis, synthesis and publication times; inspect native session turns, tool usage and token details when diagnosing model time. Count missed, confirmed and out-of-scope findings alongside duration. A successful publication alone does not establish useful quality or acceptable latency. Never compare a fresh baseline against a candidate that skipped already reviewed commits.
+
+Keep compatible sessions and completed analysis for continuation and failed-stage recovery. Explain a full-review fallback when settings, trusted base, engine compatibility or retention changes prevent reuse; do not bypass compatibility checks to obtain a faster result.
 
 ## 4. Integrate the versioned interface
 

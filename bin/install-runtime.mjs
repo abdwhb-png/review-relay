@@ -11,6 +11,13 @@ function run(command, args) {
     if (result.status !== 0) throw new Error(`Runtime setup failed: ${command}`);
 }
 
+export function ensurePrAgentImage() {
+    const installed = spawnSync('docker', ['image', 'inspect', runtime.prAgent.image], {
+        stdio: 'ignore',
+    });
+    if (installed.status !== 0) run('docker', ['pull', runtime.prAgent.image]);
+}
+
 export function runtimeCache() {
     const checkout = createHash('sha256').update(resolve(process.cwd())).digest('hex').slice(0, 16);
     return join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'reviewrelay', checkout);
@@ -25,12 +32,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
         )
             throw new Error('ReviewRelay requires Linux x64 and Node.js 24 or newer.');
         const operation = process.env.REVIEW_OPERATION;
-        if (['analyze', 'synthesize', 'improve', 'publish'].includes(operation)) {
-            const installed = spawnSync('docker', ['image', 'inspect', runtime.prAgent.image], {
-                stdio: 'ignore',
-            });
-            if (installed.status !== 0) run('docker', ['pull', runtime.prAgent.image]);
-        }
+        if (['analyze', 'synthesize', 'improve'].includes(operation)) ensurePrAgentImage();
         if (operation === 'analyze' || operation === 'validate') {
             const asset = operation === 'validate' ? runtime.actionlint : runtime.opencode;
             const name = operation === 'validate' ? 'actionlint' : 'opencode';

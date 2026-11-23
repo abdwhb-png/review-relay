@@ -69,7 +69,7 @@ runs:
           with:
               ref: ${{ steps.prepare.outputs.source-ref }}
               persist-credentials: false
-              fetch-depth: 0
+              fetch-depth: ${{ inputs.operation == 'finish' && 1 || 0 }}
         - shell: bash
           env:
               TOOL_ACTION_PATH: ${{ github.action_path }}

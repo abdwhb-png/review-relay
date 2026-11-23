@@ -1,3 +1,4 @@
+import { ensurePrAgentImage } from './install-runtime.mjs';
 import {
     runtime,
     artifactSchemaVersion,
@@ -745,7 +746,7 @@ function previousSession(work, scope, globs) {
                 !item.expired &&
                 reviewIdentity(settings().reviewId).analysisArtifactPattern.test(item.name),
         )) {
-            const dir = downloadArtifact(artifact.id, work);
+            const dir = downloadArtifact(artifact.id, work, { artifact, run });
             const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
             const identity = archiveIdentity(settings());
             if (
@@ -833,7 +834,7 @@ function openCodeRuntime(provider, work, snapshot) {
     return { runtime, values, state };
 }
 
-function discoverInstructions(work, provider = 'primary') {
+function discoverInstructions(work, trusted, provider = 'primary') {
     const configurationDirectories = [
         '.opencode',
         settings().providerEnv.opencode?.OPENCODE_CONFIG_DIR,
@@ -851,15 +852,6 @@ function discoverInstructions(work, provider = 'primary') {
         throw new Error(
             'Executable native extensions are not supported in the inspection sandbox.',
         );
-    const trusted = join(work, `trusted-${provider}`);
-    mkdirSync(trusted);
-    checkoutFiles(
-        process.env.BASE_SHA,
-        trusted,
-        join(work, `trusted-index-${provider}`),
-        (name) => !privateEnv.test(name),
-    );
-    execute('git', ['init', '--quiet', '--template=', trusted]);
     const { runtime, values } = openCodeRuntime(provider, work, trusted);
     const log = join(work, `native-config-${provider}.json`);
     if (
@@ -1034,8 +1026,6 @@ function prAgentAttempt(provider, work, prepared, improve = false) {
     const log = join(dir, 'pr-agent.log');
     const reportSize = improve ? 0 : readFileSync(join(prepared.input, reportName), 'utf8').length;
     if (!improve && reportSize === 0) throw new Error('Missing OpenCode report.');
-    if (!improve)
-        nativeScope(work, prepared.excludedPaths, !prepared.scope.incremental, prepared.scope);
     const variables = {
         ...(provider === 'primary' ? (key ? { OPENAI__KEY: key } : {}) : { OPENROUTER__KEY: key }),
         ...nativeSettings(prepared.excludedPaths, prepared.scope, provider),
@@ -1198,12 +1188,21 @@ async function analyze() {
     }
     const diffPath = join(work, 'pr.diff');
     writeFileSync(diffPath, diff);
-    discoverInstructions(work);
+    const trusted = join(work, 'trusted');
+    mkdirSync(trusted);
+    checkoutFiles(
+        process.env.BASE_SHA,
+        trusted,
+        join(work, 'trusted-index'),
+        (name) => !privateEnv.test(name),
+    );
+    execute('git', ['init', '--quiet', '--template=', trusted]);
+    discoverInstructions(work, trusted);
     if (
         process.env.MANUAL === 'true' &&
         (settings().manualFallback || process.env.FALLBACK_ENABLED === 'true')
     )
-        discoverInstructions(work, 'fallback');
+        discoverInstructions(work, trusted, 'fallback');
     const snapshot = prepareSnapshot(work, diffPath);
     updateReviewCheck(
         'OpenCode analysis',
@@ -1305,6 +1304,7 @@ function publish() {
     const kind = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')).kind;
     readManifest(directory, kind, settings());
     if (kind === 'suggestions') {
+        ensurePrAgentImage();
         const log = join(reviewDirectory(), 'publish-suggestions.log');
         if (
             !docker(
