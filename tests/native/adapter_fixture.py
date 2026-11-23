@@ -184,6 +184,8 @@ except RuntimeError as error:
     sys.exit(0)
 except SystemExit as exit:
     assert exit.code in (None, 0), exit.code
+if operation == 'scope-mismatch':
+    raise AssertionError('Mismatched scope reached generation instead of being refused')
 assert not unmodeled, f'Incomplete external HTTP fixture: {unmodeled}'
 assert not unfrozen, f'Native configuration read a mutable branch: {unfrozen}'
 if operation == 'repository-settings':
