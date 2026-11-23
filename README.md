@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.3.1 candidate:** reduce redundant runtime preparation, scope probes, artifact metadata reads and fallback snapshot copies. Public interfaces and native profiles are unchanged. Release qualification is pending.
+**Version 1.3.1:** reduce redundant runtime preparation, scope probes, artifact metadata reads and fallback snapshot copies. Public interfaces and native profiles are unchanged. See [qualification](docs/qualification.md#version-131) for measured results and their boundaries.
 
 ## Agent skill
 
