@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.3.0:** route project-specific comment commands to independent review streams across separate callers, reusable-workflow matrices or action chains. Named streams identify themselves in published reviews and references. Keep the documented [workflow trust boundary](#workflow-trust-boundary); see [qualification](docs/qualification.md) for the evidence and boundaries.
+**Version 1.3.1:** reduce redundant runtime preparation, scope probes, artifact metadata reads and fallback snapshot copies. Public interfaces and native profiles are unchanged. See [qualification](docs/qualification.md#version-131) for measured results and their boundaries.
 
 ## Agent skill
 
@@ -92,6 +92,14 @@ Pass credentials and native invocation overrides through the `provider-env` secr
 For another primary provider, select its model and connection settings in the native configuration and supply that provider's native credential variables. For invocation overrides, OpenCode accepts `OPENCODE_CONFIG_CONTENT` as a JSON object serialized into a string; PR-Agent accepts its native `SECTION__KEY` environment names. The engines retain their own merge and list semantics. Configuration fingerprints include native noncredential overrides, so changing a token budget invalidates reuse while rotating a credential does not.
 
 ReviewRelay owns the safety constraints: frozen revisions, inspection-only OpenCode permissions, repository context from the frozen base, generation without native publication, explicit failure propagation, and coordinated fallback. Do not enable `config.publish_output`, native `fallback_models`, or `config.repo_context_from_default_branch` in PR-Agent files; conflicting settings fail. When the default `.pr_agent.toml` is absent at the frozen base, native repository-settings loading is disabled to prevent its fallback to a moving default branch. Include the selected repository TOML when opting into native per-directory settings. Executable OpenCode extensions, MCP configuration, and custom SDK package declarations are outside the inspection sandbox; use the pinned runtime's built-in providers and declarative settings.
+
+## Focus and performance
+
+Give both engines the intended review mission through trusted native instructions. A named stream isolates state; it does not specialize the generic analysis automatically. PR-Agent extra instructions alone do not constrain OpenCode. Verify the archived analysis stayed in scope before enabling automatic specialized review. The [adoption skill](skills/review-relay/SKILL.md#keep-the-review-focused-and-measurable) explains configuration and measurement practices.
+
+Compare equivalent fresh reviews or continuations on frozen revisions, separating setup and publication from model time. Use the existing stage logs and native session/report data; report finding quality alongside latency. Exclusions filter the primary diff while retaining supporting inspection context. Native effort and model choices remain independently configurable; no universal time, token or step ceiling is imposed.
+
+An engine upgrade changes exact archive compatibility and can require a complete first review. This corrective release preserves schema versions but does not relax those checks. Reports, sessions and performance evidence remain under consumer access controls.
 
 ## Compose operations
 

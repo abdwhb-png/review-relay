@@ -101,6 +101,9 @@ if (process.argv[2] === 'run') {
     process.exit(0);
 }
 const endpoint = process.argv[3];
+const fixtureRun = {id:900,head_sha:process.env.GITHUB_WORKFLOW_SHA,event:'issue_comment',head_branch:'main',path:process.env.FIXTURE_WRONG_WORKFLOW || '.github/workflows/custom.yml',repository:{full_name:process.env.GITHUB_REPOSITORY},head_repository:{full_name:process.env.GITHUB_REPOSITORY}};
+const artifactPages = JSON.parse(process.env.FIXTURE_ARTIFACT_PAGES || JSON.stringify([{artifacts:[{id:70,name:process.env.FIXTURE_ARTIFACT_NAME || 'reviewrelay-analyze-42-1',expired:false}]}])).map(page=>({...page,artifacts:page.artifacts.map(a=>({workflow_run:{id:900},...a}))}));
+if (process.env.FIXTURE_NO_METADATA && (endpoint.endsWith('/artifacts/70') || endpoint.endsWith('/actions/runs/900'))) process.exit(77);
 if (endpoint.endsWith('/artifacts/70/zip')) {
     const result=require('node:child_process').spawnSync('python3',['-c','import os,sys,zipfile; z=zipfile.ZipFile(sys.stdout.buffer, "w"); root=sys.argv[1]; [z.write(os.path.join(root,n),n) for n in os.listdir(root)]; z.close()',process.env.FIXTURE_ARCHIVE_DIR || process.env.FIXTURE_PREVIOUS_DIR]);
     process.stdout.write(result.stdout);process.exit(result.status);
@@ -131,8 +134,8 @@ if (endpoint.endsWith('/reviews')) {
     const review = fs.readFileSync(0, 'utf8');
     fs.appendFileSync('published', review + '\\n');
     console.log(JSON.stringify({state:'COMMENTED',commit_id:JSON.parse(review).commit_id,html_url:'https://github.com/fixture/review'}));
-} else if (endpoint.includes('/actions/workflows/')) console.log('['+(process.env.FIXTURE_RUNS || '{"workflow_runs":[]}')+']');
-else if (endpoint.includes('/artifacts?')) console.log(process.env.FIXTURE_ARTIFACT_PAGES || JSON.stringify([{artifacts:[{id:70,name:process.env.FIXTURE_ARTIFACT_NAME || 'reviewrelay-analyze-42-1',expired:false}]}]));
+} else if (endpoint.includes('/actions/workflows/')) console.log(JSON.stringify([{workflow_runs:JSON.parse(process.env.FIXTURE_RUNS || '{"workflow_runs":[]}').workflow_runs.map(r=>({...fixtureRun,...r}))}]));
+else if (endpoint.includes('/artifacts?')) console.log(JSON.stringify(artifactPages));
 else if (endpoint.endsWith('/issues/42/comments')) {
     fs.appendFileSync('reference-calls','1'); fs.writeFileSync('reference',fs.readFileSync(0,'utf8')); console.log('{"id":3}');
 } else console.log(process.env.FIXTURE_PULL);
@@ -145,6 +148,8 @@ else if (endpoint.endsWith('/issues/42/comments')) {
 const fs = require('node:fs');
 const {execFileSync} = require('node:child_process');
 const args = process.argv.slice(2);
+if (process.env.FIXTURE_NO_DOCKER) process.exit(78);
+if(args[0]==='image' || args[0]==='pull') process.exit(0);
 const mount = (name) => args.find((arg) => arg.includes(',dst=' + name)).split(',')[1].slice(4);
 if (args.includes('/opt/native.py') && !args.includes('generate')) {
     if (process.env.FIXTURE_NATIVE_SCOPE && process.env.GITHUB_ACTIONS !== 'true') throw new Error('Missing native Actions identity');
@@ -211,14 +216,16 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
         write('output', '');
         return spawnSync(
             process.execPath,
-            overrides.FIXTURE_ACTION
-                ? [
-                      fileURLToPath(new URL('../../bin/action.mjs', import.meta.url)),
-                      overrides.FIXTURE_PREPARE ? 'prepare' : 'run',
-                  ]
-                : [fileURLToPath(new URL('../../bin/pr-review.mjs', import.meta.url)), command],
+            overrides.FIXTURE_INSTALL
+                ? [fileURLToPath(new URL('../../bin/install-runtime.mjs', import.meta.url))]
+                : overrides.FIXTURE_ACTION
+                  ? [
+                        fileURLToPath(new URL('../../bin/action.mjs', import.meta.url)),
+                        overrides.FIXTURE_PREPARE ? 'prepare' : 'run',
+                    ]
+                  : [fileURLToPath(new URL('../../bin/pr-review.mjs', import.meta.url)), command],
             {
-                cwd: fixture,
+                cwd: overrides.FIXTURE_CWD || fixture,
                 encoding: 'utf8',
                 env: {
                     ...process.env,
@@ -745,6 +752,9 @@ await test('the command entrypoint acknowledges eligible comments before allowin
         `#!${process.execPath}
 const fs = require('node:fs');
 const endpoint = process.argv[3];
+const fixtureRun = {id:900,head_sha:process.env.GITHUB_WORKFLOW_SHA,event:'issue_comment',head_branch:'main',path:process.env.FIXTURE_WRONG_WORKFLOW || '.github/workflows/custom.yml',repository:{full_name:process.env.GITHUB_REPOSITORY},head_repository:{full_name:process.env.GITHUB_REPOSITORY}};
+const artifactPages = JSON.parse(process.env.FIXTURE_ARTIFACT_PAGES || JSON.stringify([{artifacts:[{id:70,name:process.env.FIXTURE_ARTIFACT_NAME || 'reviewrelay-analyze-42-1',expired:false}]}])).map(page=>({...page,artifacts:page.artifacts.map(a=>({workflow_run:{id:900},...a}))}));
+if (process.env.FIXTURE_NO_METADATA && (endpoint.endsWith('/artifacts/70') || endpoint.endsWith('/actions/runs/900'))) process.exit(77);
 fs.appendFileSync(process.env.FIXTURE_CALLS, endpoint + '\\n');
 if (endpoint.endsWith('/permission')) console.log(JSON.stringify({ permission: process.env.FIXTURE_PERMISSION }));
 else if (endpoint.endsWith('/reactions')) {
@@ -1909,7 +1919,8 @@ await test('a completed stream resumes its session from a globally failed run', 
     git('add', 'app.txt');
     git('commit', '-qm', 'Follow-up');
     const head = git('rev-parse', 'HEAD');
-    const resumed = run('analyze', {
+    const continuation = {
+        FIXTURE_NO_METADATA: '1',
         HEAD_SHA: head,
         GITHUB_RUN_ID: '901',
         FIXTURE_PULL: JSON.stringify({
@@ -1947,12 +1958,30 @@ await test('a completed stream resumes its session from a globally failed run', 
                 ],
             },
         ]),
-    });
+    };
+    const resumed = run('analyze', continuation);
     assert.equal(resumed.status, 0, resumed.stderr);
     assert.match(resumed.stdout, /Resuming OpenCode session from run 900/);
     assert.match(read('session-imports'), /Previous context/);
     assert.match(read('opencode.diff'), /Follow-up change/);
     assert.doesNotMatch(read('opencode.diff'), /^\+Product change/m);
+    for (const invalid of [
+        { run: { repository: { full_name: 'foreign/project' } } },
+        { run: { path: '.github/workflows/untrusted.yml' } },
+        { artifact: { workflow_run: { id: 999 } } },
+    ]) {
+        const runs = JSON.parse(continuation.FIXTURE_RUNS);
+        Object.assign(runs.workflow_runs[0], invalid.run);
+        const pages = JSON.parse(continuation.FIXTURE_ARTIFACT_PAGES);
+        Object.assign(pages[1].artifacts[0], invalid.artifact);
+        const denied = run('analyze', {
+            ...continuation,
+            FIXTURE_RUNS: JSON.stringify(runs),
+            FIXTURE_ARTIFACT_PAGES: JSON.stringify(pages),
+        });
+        assert.equal(denied.status, 1);
+        assert.match(denied.stderr, /trusted consumer workflow/);
+    }
 });
 
 await test('stream identifiers and selected TOMLs are validated at authorization', (t) => {
@@ -2144,4 +2173,54 @@ await test('invalid or disabled caller command lists cannot authorize inference'
     });
     assert.ok(!readdirSync(fixture).includes('provider-calls'));
     assert.ok(!readdirSync(fixture).includes('published'));
+});
+
+await test('review publication needs no Docker installation or invocation', (t) => {
+    const { run, outputs, read } = reviewFixture(t);
+    const initial = run('analyze');
+    assert.equal(initial.status, 0, initial.stderr);
+    const analysis = outputs().reports;
+    assert.equal(run('synthesize', { OPENCODE_REPORT_DIR: analysis }).status, 0);
+    const reports = outputs().reports;
+    const setup = run('publish', { FIXTURE_INSTALL: true, FIXTURE_NO_DOCKER: '1' });
+    assert.equal(setup.status, 0, setup.stderr);
+    const result = run('publish', { REVIEW_REPORT_DIR: reports, FIXTURE_NO_DOCKER: '1' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(JSON.parse(read('published')).body, /PR-Agent report/);
+    assert.match(JSON.parse(read('reference')).body, /Native reference/);
+});
+
+await test('finish resolves the latest retry check from a shallow trusted checkout', (t) => {
+    const { fixture, git, run, baseSha } = reviewFixture(t);
+    git('branch', 'frozen-base', baseSha);
+    const shallow = join(fixture, 'shallow');
+    git('clone', '--quiet', '--depth=1', '--branch=frozen-base', 'file://' + fixture, shallow);
+    assert.equal(
+        spawnSync('git', ['rev-parse', '--is-shallow-repository'], {
+            cwd: shallow,
+            encoding: 'utf8',
+        }).stdout.trim(),
+        'true',
+    );
+    const check = {
+        name: 'ReviewRelay PR review',
+        external_id: 'reviewrelay-900',
+        app: { slug: 'github-actions' },
+    };
+    const result = run('finish', {
+        FIXTURE_CWD: shallow,
+        GITHUB_RUN_ATTEMPT: '2',
+        PUBLISH_RESULT: 'success',
+        FIXTURE_CHECK_RUNS: JSON.stringify([
+            { ...check, id: 123 },
+            { ...check, id: 124 },
+        ]),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const updates = readFileSync(join(shallow, 'check-updates'), 'utf8')
+        .trim()
+        .split('\n')
+        .map(JSON.parse);
+    assert.equal(updates.at(-1).endpoint, 'repos/example/project/check-runs/124');
+    assert.equal(updates.at(-1).body.conclusion, 'success');
 });

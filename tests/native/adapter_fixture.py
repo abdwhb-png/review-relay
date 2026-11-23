@@ -117,7 +117,7 @@ os.environ.update({
     'REVIEW_PUBLICATION_MARKER': '<!-- reviewrelay:'+'a'*64+' -->',
     'OPENAI_CUSTOM_HEADERS': 'x-opencode-session: reviewrelay-fixture/project-42',
 })
-if operation in ('review-output', 'review-output-disabled', 'repository-review-output'):
+if operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'scope-mismatch'):
     model_requests = []
 
     class ModelAPI(BaseHTTPRequestHandler):
@@ -167,15 +167,25 @@ Path('/output/suggestions.json').write_text(json.dumps({'code_suggestions': [{
     'suggestion_content': 'Preserve the existing behavior', 'one_sentence_summary': 'Preserve behavior', 'label': 'bug', 'score': 9,
 }], 'publication_settings': {'committable_code_suggestions': not summarized}}))
 sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else 'scope' if operation in (*stream_scope_operations, 'provider-settings', 'repository-settings') else operation]
-if operation in ('review-output', 'review-output-disabled', 'repository-review-output'):
+if operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'scope-mismatch'):
     sys.argv = ['/tool/bin/pr-agent-native.py', 'generate', '--pr_url', pull['html_url'],
                 '--config-branch', BASE, '--json-output', '/output/review.json', 'review']
+if operation == 'scope-mismatch':
+    os.environ['REVIEW_SCOPE'] = json.dumps({'incremental': False, 'start': BASE, 'first': None, 'paths': ['different.py']})
 captured = io.StringIO()
 try:
     with contextlib.redirect_stdout(captured):
         runpy.run_path('/tool/bin/pr-agent-native.py', run_name='__main__')
+except RuntimeError as error:
+    assert operation == 'scope-mismatch' and str(error) == 'Native review scope changed during this run', str(error)
+    assert not model_requests and not writes and not unmodeled
+    model_api.shutdown()
+    print('Mismatched scope refused before inference')
+    sys.exit(0)
 except SystemExit as exit:
     assert exit.code in (None, 0), exit.code
+if operation == 'scope-mismatch':
+    raise AssertionError('Mismatched scope reached generation instead of being refused')
 assert not unmodeled, f'Incomplete external HTTP fixture: {unmodeled}'
 assert not unfrozen, f'Native configuration read a mutable branch: {unfrozen}'
 if operation == 'repository-settings':
@@ -192,7 +202,7 @@ elif operation in ('own-stream-scope', 'visible-stream-scope', 'visible-incremen
 elif operation in ('scope','stream-scope','named-stream-scope'):
     scope = json.loads(captured.getvalue().splitlines()[-1])
     assert scope == {'incremental': False, 'start': BASE, 'first': None, 'paths': ['app.py']}, scope
-elif operation in ('review-output', 'review-output-disabled', 'repository-review-output'):
+elif operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'scope-mismatch'):
     model_api.shutdown()
     assert len(model_requests) == 1, model_requests
     if operation == 'repository-review-output':
