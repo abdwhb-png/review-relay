@@ -226,7 +226,8 @@ elif operation in ('review-output', 'review-output-disabled', 'repository-review
     body = rendered['body']
     assert rendered['anchor'] in body, rendered
     if operation != 'review-assessment-disabled':
-        assert 'medium' in body and 'app.py' in body, body
+        assert re.search(r'Risk level.*?Medium', body, re.IGNORECASE) and 'app.py' in body, body
+        assert 'Incorrect flag behavior' in body, body
     assert 'Tool usage guide' in body, body
     assert 'Relevant configurations' in body, body
     if operation.endswith('-disabled'):
