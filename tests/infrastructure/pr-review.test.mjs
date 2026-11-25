@@ -1,3 +1,4 @@
+import { composeReviewOutput } from '../../bin/review-output.mjs';
 import { runtime } from '../../bin/artifacts.mjs';
 import assert from 'node:assert/strict';
 import { pullRevision } from '../../bin/github-actions.mjs';
@@ -172,7 +173,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     fs.appendFileSync('session-imports',fs.readFileSync(mount('/state')+'/previous-session.json','utf8')+'\\n');
     console.log('Imported session: ses_fixture');
 } else if (args.includes('export')) {
-    console.log(JSON.stringify({info:{id:'ses_fixture'},messages:[{type:'user',text:'Previous context fixture-gh-token'},{id:'end',type:'assistant',content:[{type:'text',text:process.env.FIXTURE_SANITIZED_EXPORT ? '[redacted:text:end]' : 'OpenCode report fixture-go-key'}]}]}));
+    console.log(JSON.stringify({info:{id:'ses_fixture'},messages:[{type:'user',text:'Previous context fixture-gh-token'},{id:'end',type:'assistant',model:{providerID:'fixture',id:'review-model'},content:[{type:'text',text:process.env.FIXTURE_SANITIZED_EXPORT ? '[redacted:text:end]' : 'OpenCode report fixture-go-key'}]}]}));
 } else if (args.includes('--standalone')) {
     fs.appendFileSync('provider-calls', 'opencode\\n');
     const src = mount('/review');
@@ -182,7 +183,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     fs.writeFileSync('snapshot',JSON.stringify(Object.fromEntries(fs.readdirSync(src,{recursive:true}).filter(p=>fs.statSync(src+'/'+p).isFile() && !p.startsWith('.git/')).map(p=>[p,fs.readFileSync(src+'/'+p,'utf8')]))));
     fs.writeFileSync('opencode-inline-config',process.env.OPENCODE_CONFIG_CONTENT);
     console.log(JSON.stringify({type:'text',sessionID:'ses_fixture',part:{messageID:'end',text:'OpenCode report fixture-go-key'}}));
-    console.log(JSON.stringify({type:'step_finish',part:{reason:'stop',messageID:'end'}}));
+    console.log(JSON.stringify({type:'step_finish',part:{reason:'stop',messageID:'end',tokens:{input:11,output:7,reasoning:3,cache:{read:101,write:0}}}}));
 } else {
     fs.appendFileSync('provider-calls', 'pr-agent\\n');
     if (process.env.FIXTURE_COMMAND_EXCEPTION) {
@@ -311,14 +312,16 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     const report = readFileSync(reportPath, 'utf8');
     assert.equal(report, 'OpenCode report [redacted]\n');
-    const { producer, compatibility, configurationSha256, ...payload } = manifest;
+    const { producer, compatibility, configurationSha256, execution, ...payload } = manifest;
+    assert.equal(execution.provider, 'primary');
+    assert.ok(execution.seconds >= 0);
     assert.equal(producer.runId, '900');
     assert.equal(producer.workflowSha, baseSha);
     assert.equal(compatibility.version, runtime.version);
     assert.match(compatibility.engine, /^[a-f0-9]{64}$/);
     assert.match(configurationSha256, /^[a-f0-9]{64}$/);
     assert.deepEqual(payload, {
-        schemaVersion: 2,
+        schemaVersion: 3,
         kind: 'analysis',
         instructionPaths: [],
         repository: repo,
@@ -436,7 +439,7 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
     const sent = JSON.parse(read('published'));
     assert.match(sent.body, /<!-- reviewrelay:[a-f0-9]{64} -->$/);
     assert.deepEqual(
-        { ...sent, body: sent.body.replace(/\n\n<!-- reviewrelay:[a-f0-9]{64} -->$/, '') },
+        { ...sent, body: sent.body.split('\n\n<details>')[0] },
         {
             body: 'PR-Agent report [redacted]\n\nReview scope: 1 files excluded from the primary diff by the configured review globs.',
             commit_id: headSha,
@@ -1049,7 +1052,7 @@ await test('analysis reuse rejects effective configuration changes and synthesis
     assert.equal(result.status, 0, result.stderr);
     assert.equal(outputs().review, undefined, 'reports must not pass through job outputs');
     const manifest = JSON.parse(readFileSync(join(outputs().reports, 'manifest.json'), 'utf8'));
-    assert.equal(manifest.schemaVersion, 2);
+    assert.equal(manifest.schemaVersion, 3);
     assert.equal(manifest.kind, 'synthesis');
     assert.equal(manifest.producer.runId, '900');
 });
@@ -1797,7 +1800,7 @@ await test('named stream artifacts and publication retain their authorized ident
     assert.equal(analysis.status, 0, analysis.stderr);
     const artifact = outputs().reports;
     const manifest = JSON.parse(readFileSync(join(artifact, 'manifest.json'), 'utf8'));
-    assert.equal(manifest.schemaVersion, 2);
+    assert.equal(manifest.schemaVersion, 3);
     assert.equal(manifest.reviewId, 'localization');
     const nativeAnchor = '## PR Reviewer Guide 🔍\n\n<!-- pr-agent:review:full -->';
     const synthesis = run('synthesize', {
@@ -1844,7 +1847,9 @@ await test('named stream artifacts and publication retain their authorized ident
     const archived = readFileSync(join(reports, 'pr-agent-review.md'), 'utf8').trimEnd();
     const publicationId = /<!-- reviewrelay:[a-f0-9]{64} -->$/.exec(reviewBody)?.[0];
     assert.ok(publicationId);
-    assert.equal(reviewBody, `${archived}\n\n${publicationId}`);
+    assert.ok(reviewBody.startsWith(archived + '\n\n'));
+    assert.ok(reviewBody.endsWith(publicationId));
+    assert.match(reviewBody, /OpenCode analysis report/);
     assert.ok(referenceBody.includes(publicationId));
     const replay = run('publish', {
         ...environment,
@@ -1864,7 +1869,13 @@ await test('named stream publication limits include its visible label and archiv
             (t) => {
                 const reviewId = 'a'.repeat(64);
                 const { run, outputs, read, fixture } = reviewFixture(t, {
-                    files: { '.reviewrelay.json': JSON.stringify({ reviewId }) },
+                    files: {
+                        '.reviewrelay.json': JSON.stringify({
+                            reviewId,
+                            includeAnalysisReport: false,
+                            includePipelineDetails: false,
+                        }),
+                    },
                 });
                 assert.equal(run('analyze').status, 0);
                 const prefix = `<!-- reviewrelay:stream:${reviewId} -->\n**Review stream:** \`${reviewId}\`\n`;
@@ -2223,4 +2234,116 @@ await test('finish resolves the latest retry check from a shallow trusted checko
         .map(JSON.parse);
     assert.equal(updates.at(-1).endpoint, 'repos/example/project/check-runs/124');
     assert.equal(updates.at(-1).body.conclusion, 'success');
+});
+
+await test('publication includes verified analysis and pipeline measurements without another inference', (t) => {
+    const { run, outputs, read } = reviewFixture(t);
+    assert.equal(run('analyze').status, 0);
+    const analysis = outputs().reports;
+    assert.equal(run('synthesize', { OPENCODE_REPORT_DIR: analysis }).status, 0);
+    const reports = outputs().reports;
+    const publication = JSON.parse(readFileSync(join(reports, 'publication.json'), 'utf8'));
+    assert.match(publication.analysisReport, /OpenCode report/);
+    assert.deepEqual(publication.execution.analysis.tokens, {
+        input: 11,
+        output: 7,
+        reasoning: 3,
+        cache: { read: 101, write: 0 },
+    });
+    assert.deepEqual(publication.execution.analysis.models, ['fixture/review-model']);
+    assert.doesNotMatch(
+        JSON.stringify(publication),
+        /Previous context|fixture-go-key|fixture-gh-token/,
+    );
+    const result = run('publish', { REVIEW_REPORT_DIR: reports });
+    assert.equal(result.status, 0, result.stderr);
+    const body = JSON.parse(read('published')).body;
+    assert.match(body, /<summary>OpenCode analysis report<\/summary>/);
+    assert.match(body, /OpenCode report/);
+    assert.match(body, /<summary>ReviewRelay pipeline details<\/summary>/);
+    assert.match(body, /PR-Agent statistics/);
+    assert.equal(run('publish', { REVIEW_REPORT_DIR: reports }).status, 0);
+    assert.equal(read('published').trim().split('\n').length, 1);
+    assert.equal(read('provider-calls'), 'opencode\npr-agent\n');
+});
+
+await test('projects can disable ReviewRelay additions without replacing native output', (t) => {
+    const { run, outputs, read } = reviewFixture(t, {
+        files: {
+            '.reviewrelay.json': JSON.stringify({
+                includeAnalysisReport: false,
+                includePipelineDetails: false,
+            }),
+        },
+    });
+    const analyzed = run('analyze');
+    assert.equal(analyzed.status, 0, analyzed.stderr);
+    assert.equal(run('synthesize', { OPENCODE_REPORT_DIR: outputs().reports }).status, 0);
+    assert.equal(run('publish', { REVIEW_REPORT_DIR: outputs().reports }).status, 0);
+    const body = JSON.parse(read('published')).body;
+    assert.match(body, /PR-Agent report/);
+    assert.doesNotMatch(body, /<details>|OpenCode report/);
+});
+
+await test('large verified analysis is excerpted safely while native findings and the full artifact are retained', (t) => {
+    const { run, outputs, read } = reviewFixture(t);
+    assert.equal(run('analyze').status, 0);
+    const analysis = outputs().reports;
+    const report = 'Évidence <script> & ```\n'.repeat(9000);
+    writeFileSync(join(analysis, 'opencode-report.md'), report);
+    const manifest = JSON.parse(readFileSync(join(analysis, 'manifest.json'), 'utf8'));
+    manifest.files['opencode-report.md'] = createHash('sha256').update(report).digest('hex');
+    writeFileSync(join(analysis, 'manifest.json'), JSON.stringify(manifest));
+    assert.equal(run('synthesize', { OPENCODE_REPORT_DIR: analysis }).status, 0);
+    const synthesis = outputs().reports;
+    assert.equal(
+        JSON.parse(readFileSync(join(synthesis, 'publication.json'))).analysisReport,
+        report,
+    );
+    const result = run('publish', { REVIEW_REPORT_DIR: synthesis });
+    assert.equal(result.status, 0, result.stderr);
+    const body = JSON.parse(read('published')).body;
+    assert.ok(Buffer.byteLength(body) <= 65536);
+    assert.ok(body.startsWith('PR-Agent report'));
+    assert.match(body, /Report excerpt/);
+    assert.match(body, /Complete analysis artifact/);
+    assert.match(body, /&lt;script&gt;/);
+    assert.doesNotMatch(body, /\uFFFD/);
+    const repeat = run('publish', { REVIEW_REPORT_DIR: synthesis });
+    assert.equal(repeat.status, 0, repeat.stderr);
+    assert.equal(read('published').trim().split('\n').length, 1);
+});
+
+await test('presentation settings reject non-boolean values before generation', (t) => {
+    for (const field of ['includeAnalysisReport', 'includePipelineDetails']) {
+        const { run, fixture } = reviewFixture(t, {
+            files: { '.reviewrelay.json': JSON.stringify({ [field]: 'false' }) },
+        });
+        assert.equal(run('analyze').status, 1);
+        assert.ok(!readdirSync(fixture).includes('provider-calls'));
+    }
+});
+
+await test('pipeline elapsed time rounds the measured half-step and marks missing timestamps unavailable', () => {
+    const publication = {
+        analysisReport: 'Report',
+        analysisSource: { runId: '900', artifactId: null },
+    };
+    const config = { includeAnalysisReport: false, includePipelineDetails: true };
+    const context = {
+        repository: 'example/project',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        now: Date.parse('2026-01-01T00:00:01.550Z'),
+    };
+    assert.match(
+        composeReviewOutput('Native', 'marker', publication, config, context),
+        /publication preparation: 1\.6s/,
+    );
+    assert.match(
+        composeReviewOutput('Native', 'marker', publication, config, {
+            ...context,
+            createdAt: undefined,
+        }),
+        /publication preparation: unavailable/,
+    );
 });

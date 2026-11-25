@@ -4,5 +4,7 @@
     "manualFallback": false,
     "manualDraftReview": false,
     "instructionSources": ["CLAUDE.md", "guidance/*.md"],
-    "retentionDays": 7
+    "retentionDays": 7,
+    "includeAnalysisReport": true,
+    "includePipelineDetails": true
 }

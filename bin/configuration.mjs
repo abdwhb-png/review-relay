@@ -7,6 +7,8 @@ const defaults = {
     reviewId: null,
     prAgentConfigPath: '.pr_agent.toml',
     autoReview: false,
+    includeAnalysisReport: true,
+    includePipelineDetails: true,
     manualFallback: false,
     manualDraftReview: false,
     baseBranches: null,
@@ -191,6 +193,8 @@ export function loadConfiguration(env = process.env) {
         Object.keys(config).some((key) => !Object.hasOwn(defaults, key)) ||
         config.schemaVersion !== 1 ||
         typeof config.autoReview !== 'boolean' ||
+        typeof config.includeAnalysisReport !== 'boolean' ||
+        typeof config.includePipelineDetails !== 'boolean' ||
         typeof config.manualFallback !== 'boolean' ||
         typeof config.manualDraftReview !== 'boolean' ||
         !Number.isSafeInteger(config.retentionDays) ||

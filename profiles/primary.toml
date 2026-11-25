@@ -12,6 +12,9 @@ reasoning_effort = "high"
 response_language = "en-US"
 
 [pr_reviewer]
+require_risk_assessment = true
+require_failure_modes = true
+require_priority_files = true
 require_estimate_effort_to_review = false
 enable_review_labels_effort = false
 enable_review_labels_security = false

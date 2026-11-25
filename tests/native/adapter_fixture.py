@@ -117,7 +117,9 @@ os.environ.update({
     'REVIEW_PUBLICATION_MARKER': '<!-- reviewrelay:'+'a'*64+' -->',
     'OPENAI_CUSTOM_HEADERS': 'x-opencode-session: reviewrelay-fixture/project-42',
 })
-if operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'scope-mismatch'):
+if operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'review-assessment-disabled', 'scope-mismatch'):
+    if operation == 'review-assessment-disabled':
+        os.environ.update({f'PR_REVIEWER__{field}': 'false' for field in ('REQUIRE_RISK_ASSESSMENT', 'REQUIRE_FAILURE_MODES', 'REQUIRE_PRIORITY_FILES')})
     model_requests = []
 
     class ModelAPI(BaseHTTPRequestHandler):
@@ -128,6 +130,8 @@ if operation in ('review-output', 'review-output-disabled', 'repository-review-o
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             model_requests.append(request)
             prediction = 'review:\n  relevant_tests: "Yes"\n  security_concerns: "No"\n  key_issues_to_review: []\n'
+            if operation != 'review-assessment-disabled':
+                prediction += '  risk_level: medium\n  failure_modes:\n    - what: Incorrect flag behavior\n      where: app.py\n      trigger: Flag disabled\n      detected_by: nothing\n      covered_in_this_pr: false\n  review_priority_files: [app.py]\n'
             response = {
                 'id': 'fixture-completion', 'object': 'chat.completion', 'created': 1,
                 'model': 'deepseek-v4.1-flash',
@@ -167,7 +171,7 @@ Path('/output/suggestions.json').write_text(json.dumps({'code_suggestions': [{
     'suggestion_content': 'Preserve the existing behavior', 'one_sentence_summary': 'Preserve behavior', 'label': 'bug', 'score': 9,
 }], 'publication_settings': {'committable_code_suggestions': not summarized}}))
 sys.argv = ['/tool/bin/pr-agent-native.py', 'publish-suggestions' if summarized else 'scope' if operation in (*stream_scope_operations, 'provider-settings', 'repository-settings') else operation]
-if operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'scope-mismatch'):
+if operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'review-assessment-disabled', 'scope-mismatch'):
     sys.argv = ['/tool/bin/pr-agent-native.py', 'generate', '--pr_url', pull['html_url'],
                 '--config-branch', BASE, '--json-output', '/output/review.json', 'review']
 if operation == 'scope-mismatch':
@@ -202,17 +206,27 @@ elif operation in ('own-stream-scope', 'visible-stream-scope', 'visible-incremen
 elif operation in ('scope','stream-scope','named-stream-scope'):
     scope = json.loads(captured.getvalue().splitlines()[-1])
     assert scope == {'incremental': False, 'start': BASE, 'first': None, 'paths': ['app.py']}, scope
-elif operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'scope-mismatch'):
+elif operation in ('review-output', 'review-output-disabled', 'repository-review-output', 'review-assessment-disabled', 'scope-mismatch'):
     model_api.shutdown()
     assert len(model_requests) == 1, model_requests
     if operation == 'repository-review-output':
         prompt=json.dumps(model_requests[0]['messages'])
         assert 'LOCALIZATION_ONLY_FIXTURE_CONTEXT' in prompt and 'GENERAL_ONLY_FIXTURE_CONTEXT' not in prompt, prompt
     data = json.loads(Path('/output/review.json').read_text())
+    prompt = json.dumps(model_requests[0]['messages'])
+    if operation == 'review-assessment-disabled':
+        assert 'risk_level' not in data['review']
+        assert 'risk_level:' not in prompt
+    else:
+        assert data['review']['risk_level'] == 'medium', data
+        assert data['review']['review_priority_files'] == ['app.py'], data
+        assert 'failure_modes' in prompt and 'review_priority_files' in prompt
     assert data['usage'] == {'prompt_tokens': 123, 'completion_tokens': 45, 'total_tokens': 168}, data
     rendered = json.loads(Path('/output/rendered.json').read_text())
     body = rendered['body']
     assert rendered['anchor'] in body, rendered
+    if operation != 'review-assessment-disabled':
+        assert 'medium' in body and 'app.py' in body, body
     assert 'Tool usage guide' in body, body
     assert 'Relevant configurations' in body, body
     if operation.endswith('-disabled'):
