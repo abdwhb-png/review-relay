@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.4.0 candidate:** native PR-Agent assessments, collapsible OpenCode reports and attributed pipeline measurements. Qualification is pending; this is not a stable-release claim.
+**Version 1.4.0 candidate:** native PR-Agent assessments, collapsible OpenCode reports and attributed pipeline measurements. See [candidate qualification](docs/qualification.md#version-140-candidate) for executed checks and their boundaries. A stable tag has not been published.
 
 ## Agent skill
 
@@ -139,6 +139,8 @@ GitHub artifact metadata identifies the caller workflow and run. ReviewRelay ver
 Reports and native session exports stay in consumer Actions artifacts. They can contain source excerpts and complete conversations; artifact visibility follows that repository's GitHub access policy. The public tool repository receives none of this content. Explicit provider credential values are redacted before archival; no general source-code secret scanner is implied.
 
 Operations download artifacts by ID and verify GitHub producer metadata, consumer identity, schema, exact engine/runtime compatibility, effective configuration fingerprint, frozen revision, native scope, reconstructed diff, and payload checksums. Callers never handle OpenCode's internal session storage. Unknown formats and expired, corrupt, incompatible, or wrong-producer artifacts fail explicitly.
+
+The pinned [native incremental history](https://github.com/The-PR-Agent/pr-agent/blob/efdde4afe14aa401a3889012c7f3e9ef3081a430/pr_agent/git_providers/github_provider.py) uses commit timestamps relative to the previous review reference. A commit created before that reference can require a complete review when no matching archived context exists. Create qualification continuation commits after the preceding review completes; do not rewrite project history merely to force reuse.
 
 Use **Re-run failed jobs** on the same Actions run to reuse a completed analysis after synthesis failure. Changed revisions or analysis configuration require a new request. A new review request uses PR-Agent's native incremental boundary and imports a compatible archived native OpenCode session. No new changes invokes no model. Missing, expired, or incompatible history starts a complete review with an explicit summary; corrupt compatible context blocks. Artifacts from the pre-extraction implementation are not imported. Engine compatibility is conservative: changes to the recorded engine sources, native profiles, or runtime pins require fresh context.
 

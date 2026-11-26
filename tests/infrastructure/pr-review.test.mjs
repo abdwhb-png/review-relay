@@ -2289,7 +2289,7 @@ await test('large verified analysis is excerpted safely while native findings an
     const { run, outputs, read } = reviewFixture(t);
     assert.equal(run('analyze').status, 0);
     const analysis = outputs().reports;
-    const report = 'Évidence <script> & ```\n'.repeat(9000);
+    const report = 'Évidence 😀 <script> & ```\n'.repeat(9000);
     writeFileSync(join(analysis, 'opencode-report.md'), report);
     const manifest = JSON.parse(readFileSync(join(analysis, 'manifest.json'), 'utf8'));
     manifest.files['opencode-report.md'] = createHash('sha256').update(report).digest('hex');
@@ -2346,4 +2346,48 @@ await test('pipeline elapsed time rounds the measured half-step and marks missin
         }),
         /publication preparation: unavailable/,
     );
+});
+
+await test('report and pipeline presentation controls remain independent', (t) => {
+    for (const field of ['includeAnalysisReport', 'includePipelineDetails']) {
+        const { run, outputs, read } = reviewFixture(t, {
+            files: { '.reviewrelay.json': JSON.stringify({ [field]: false }) },
+        });
+        assert.equal(run('analyze').status, 0);
+        assert.equal(run('synthesize', { OPENCODE_REPORT_DIR: outputs().reports }).status, 0);
+        const result = run('publish', { REVIEW_REPORT_DIR: outputs().reports });
+        assert.equal(result.status, 0, result.stderr);
+        const body = JSON.parse(read('published')).body;
+        assert.equal(
+            body.includes('<summary>OpenCode analysis report</summary>'),
+            field !== 'includeAnalysisReport',
+        );
+        assert.equal(
+            body.includes('<summary>ReviewRelay pipeline details</summary>'),
+            field !== 'includePipelineDetails',
+        );
+    }
+});
+
+await test('publication refuses incomplete analysis or invalid source references before writing', (t) => {
+    for (const mutation of [
+        { analysisReport: '' },
+        { analysisSource: { runId: '900', artifactId: 'invalid' } },
+    ]) {
+        const { run, outputs, fixture } = reviewFixture(t);
+        assert.equal(run('analyze').status, 0);
+        assert.equal(run('synthesize', { OPENCODE_REPORT_DIR: outputs().reports }).status, 0);
+        const dir = outputs().reports;
+        const publication = JSON.parse(readFileSync(join(dir, 'publication.json')));
+        const value = JSON.stringify({ ...publication, ...mutation });
+        writeFileSync(join(dir, 'publication.json'), value);
+        const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json')));
+        manifest.files['publication.json'] = createHash('sha256').update(value).digest('hex');
+        writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
+        const result = run('publish', { REVIEW_REPORT_DIR: dir });
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, /analysis report|artifact reference/);
+        assert.ok(!readdirSync(fixture).includes('published'));
+        assert.ok(!readdirSync(fixture).includes('reference'));
+    }
 });
