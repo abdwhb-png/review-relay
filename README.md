@@ -50,7 +50,7 @@ Select a separate repository TOML with `prAgentConfigPath` (default `.pr_agent.t
 
 [The matrix caller](examples/multi-stream.yml) runs a complete workflow per stream in one run with `fail-fast: false`. Route automatic events and manual commands in the caller; a matrix's single output does not collect all publication URLs. Custom composed callers must pass each stream's own opaque request and artifact IDs, and use its authorization output `concurrency-group` for job concurrency. Generation and publication remain separate permission boundaries. Each caller must satisfy the [workflow trust boundary](#workflow-trust-boundary).
 
-All participating callers must use the lane-capable version. Opaque requests use format 2; manifests use format 3; configuration remains schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
+All participating callers must use the lane-capable version. Opaque requests use format 2, manifests use format 4, and configuration uses schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
 
 ## Caller-specific comment commands
 
@@ -102,7 +102,7 @@ Give both engines the intended review mission through trusted native instruction
 
 Compare equivalent fresh reviews or continuations on frozen revisions, separating setup and publication from model time. Use the existing stage logs and native session/report data; report finding quality alongside latency. Exclusions filter the primary diff while retaining supporting inspection context. Native effort and model choices remain independently configurable; no universal time, token or step ceiling is imposed.
 
-An engine upgrade changes exact archive compatibility and can require a complete first review. This corrective release preserves schema versions but does not relax those checks. Reports, sessions and performance evidence remain under consumer access controls.
+An engine upgrade changes exact archive compatibility and can require a complete first review. Reports, sessions and performance evidence remain under consumer access controls.
 
 ## Compose operations
 

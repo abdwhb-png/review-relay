@@ -2670,8 +2670,23 @@ await test('descendant analysis selects progress before run recency and fails fo
     assert.equal(read('provider-calls'), calls);
 });
 
+await test('synthesis rejects a reconstructed inspection digest mismatch before inference', (t) => {
+    const { run, read, outputs, previous } = archivedAnalysis(t);
+    const path = join(previous, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(path, 'utf8'));
+    manifest.inspection.diffSha256 = '0'.repeat(64);
+    writeFileSync(path, JSON.stringify(manifest));
+
+    const rejected = run('synthesize', { OPENCODE_REPORT_DIR: previous });
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /archived OpenCode report cannot be reused/);
+    assert.equal(outputs().state, 'new-review-required');
+    assert.equal(read('provider-calls'), 'opencode\n');
+});
+
 await test('same-head analysis reuses verified payloads without another OpenCode call', (t) => {
-    const { run, outputs, read, request, manifest, previous, headSha } = archivedAnalysis(t);
+    const { run, outputs, read, request, manifest, previous, fixture, baseSha, headSha } =
+        archivedAnalysis(t);
     const failed = run('synthesize', {
         OPENCODE_REPORT_DIR: previous,
         FIXTURE_SYNTHESIS_ERROR: 'RateLimitError: Daily quota exhausted',
@@ -2710,17 +2725,54 @@ await test('same-head analysis reuses verified payloads without another OpenCode
     assert.equal(manifest().reusedAnalysis.runId, '900');
     assert.equal(manifest().reusedAnalysis.artifactId, '70');
     assert.equal(read('provider-calls'), 'opencode\npr-agent\n');
-    const synth = run('synthesize', {
-        ...action,
-        REVIEW_ARTIFACT_ID: '71',
-        FIXTURE_ARCHIVES: JSON.stringify({ 71: newArchive }),
-    });
+    const synthesize = () =>
+        run('synthesize', {
+            ...action,
+            REVIEW_ARTIFACT_ID: '71',
+            FIXTURE_ARCHIVES: JSON.stringify({ 71: newArchive }),
+        });
+    const archiveManifestPath = join(newArchive, 'manifest.json');
+    const validArchiveManifest = readFileSync(archiveManifestPath, 'utf8');
+    const inconsistentArchive = JSON.parse(validArchiveManifest);
+    inconsistentArchive.reusedAnalysis.head = baseSha;
+    writeFileSync(archiveManifestPath, JSON.stringify(inconsistentArchive));
+    const rejectedSynthesis = synthesize();
+    assert.equal(rejectedSynthesis.status, 1);
+    assert.match(rejectedSynthesis.stderr, /archived OpenCode report cannot be reused/);
+    assert.equal(read('provider-calls'), 'opencode\npr-agent\n');
+    writeFileSync(archiveManifestPath, validArchiveManifest);
+
+    const synth = synthesize();
     assert.equal(synth.status, 0, synth.stderr);
-    const published = run('publish', {
-        ...action,
-        REVIEW_ARTIFACT_ID: '72',
-        FIXTURE_ARCHIVES: JSON.stringify({ 72: outputs().reports }),
-    });
+    const synthesisArchive = outputs().reports;
+    const publish = () =>
+        run('publish', {
+            ...action,
+            REVIEW_ARTIFACT_ID: '72',
+            FIXTURE_ARCHIVES: JSON.stringify({ 72: synthesisArchive }),
+        });
+    const publicationPath = join(synthesisArchive, 'publication.json');
+    const synthesisManifestPath = join(synthesisArchive, 'manifest.json');
+    const validPublication = readFileSync(publicationPath, 'utf8');
+    const validSynthesisManifest = readFileSync(synthesisManifestPath, 'utf8');
+    const inconsistentPublication = JSON.parse(validPublication);
+    inconsistentPublication.execution.analysis = JSON.parse(
+        readFileSync(join(previous, 'manifest.json'), 'utf8'),
+    ).execution;
+    const value = JSON.stringify(inconsistentPublication);
+    const synthesisManifest = JSON.parse(validSynthesisManifest);
+    synthesisManifest.files['publication.json'] = createHash('sha256').update(value).digest('hex');
+    writeFileSync(publicationPath, value);
+    writeFileSync(synthesisManifestPath, JSON.stringify(synthesisManifest));
+    const rejectedPublication = publish();
+    assert.equal(rejectedPublication.status, 1);
+    assert.match(rejectedPublication.stderr, /Invalid reused analysis provenance for publication/);
+    assert.ok(!readdirSync(fixture).includes('published'));
+    assert.ok(!readdirSync(fixture).includes('reference'));
+    writeFileSync(publicationPath, validPublication);
+    writeFileSync(synthesisManifestPath, validSynthesisManifest);
+
+    const published = publish();
     assert.equal(published.status, 0, published.stderr);
     const review = JSON.parse(read('published'));
     assert.equal(review.commit_id, headSha);
@@ -2753,6 +2805,57 @@ await test('same-head analysis does not duplicate a published review with a miss
     assert.equal(replay.status, 0, replay.stderr);
     assert.equal(read('published').trim().split('\n').length, 1);
     assert.equal(read('reference-calls'), '1');
+});
+
+await test('same-head analysis publishes and deduplicates each stream independently', (t) => {
+    const { run, outputs, read, previous, headSha } = archivedAnalysis(t);
+    const synth = run('synthesize', { OPENCODE_REPORT_DIR: previous });
+    assert.equal(synth.status, 0, synth.stderr);
+    const initial = run('publish', { REVIEW_REPORT_DIR: outputs().reports });
+    assert.equal(initial.status, 0, initial.stderr);
+    const defaultReference = JSON.parse(read('reference')).body;
+
+    const namedRequest = {
+        FIXTURE_ACTION: 'true',
+        REVIEW_OVERRIDES: '{"reviewId":"localization"}',
+        GITHUB_RUN_ID: '901',
+    };
+    const auth = run('authorize', namedRequest);
+    assert.equal(auth.status, 0, auth.stderr);
+    const env = { ...namedRequest, REVIEW_REQUEST: outputs().request };
+    const analyzed = run('analyze', env);
+    assert.equal(analyzed.status, 0, analyzed.stderr);
+    assert.equal(outputs().skipped, undefined);
+    const namedSynthesis = run('synthesize', {
+        ...env,
+        REVIEW_ARTIFACT_ID: '71',
+        FIXTURE_ARCHIVES: JSON.stringify({ 71: outputs().reports }),
+    });
+    assert.equal(namedSynthesis.status, 0, namedSynthesis.stderr);
+    const published = run('publish', {
+        ...env,
+        REVIEW_ARTIFACT_ID: '72',
+        FIXTURE_ARCHIVES: JSON.stringify({ 72: outputs().reports }),
+    });
+    assert.equal(published.status, 0, published.stderr);
+    const [original, named, ...duplicates] = read('published').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(duplicates, []);
+    assert.equal(original.commit_id, headSha);
+    assert.doesNotMatch(original.body, /^<!-- reviewrelay:stream:/);
+    assert.equal(named.commit_id, headSha);
+    assert.match(named.body, /^<!-- reviewrelay:stream:localization -->\n/);
+    assert.doesNotMatch(defaultReference, /^<!-- reviewrelay:stream:/);
+    assert.match(JSON.parse(read('reference')).body, /^<!-- reviewrelay:stream:localization -->\n/);
+    assert.equal(read('reference-calls'), '11');
+
+    const calls = read('provider-calls');
+    assert.equal(calls, 'opencode\npr-agent\nopencode\npr-agent\n');
+    for (const stream of [{ GITHUB_RUN_ID: '902' }, env]) {
+        const skipped = run('analyze', stream);
+        assert.equal(skipped.status, 0, skipped.stderr);
+        assert.equal(outputs().skipped, 'true');
+    }
+    assert.equal(read('provider-calls'), calls);
 });
 
 await test('descendant analysis falls back for expired, incompatible or unrelated history', (t) => {
@@ -2856,7 +2959,11 @@ await test('descendant analysis breaks equal and incomparable checkpoint ties by
     const merged = git('rev-parse', 'HEAD');
     const candidate = {
         GITHUB_RUN_ID: '903',
-        FIXTURE_ARCHIVES: JSON.stringify({ 71: firstAttempt, 72: secondAttempt, 73: rightArchive }),
+        FIXTURE_ARCHIVES: JSON.stringify({
+            99: firstAttempt,
+            100: secondAttempt,
+            101: rightArchive,
+        }),
         FIXTURE_RUNS: JSON.stringify({ workflow_runs: [{ id: 901 }, { id: 902 }] }),
     };
     const runAnalysis = (rightArtifacts) =>
@@ -2864,7 +2971,7 @@ await test('descendant analysis breaks equal and incomparable checkpoint ties by
             'analyze',
             request(merged, {
                 ...candidate,
-                FIXTURE_RUN_ARTIFACTS: JSON.stringify({ 901: [72, 71], 902: rightArtifacts }),
+                FIXTURE_RUN_ARTIFACTS: JSON.stringify({ 901: [100, 99], 902: rightArtifacts }),
             }),
         );
     const equal = runAnalysis([]);
@@ -2873,14 +2980,14 @@ await test('descendant analysis breaks equal and incomparable checkpoint ties by
         head: left,
         runId: '901',
         attempt: '2',
-        artifactId: '72',
+        artifactId: '100',
     });
-    const incomparable = runAnalysis([73]);
+    const incomparable = runAnalysis([101]);
     assert.equal(incomparable.status, 0, incomparable.stderr);
     assert.deepEqual(manifest().checkpoint, {
         head: right,
         runId: '902',
         attempt: '1',
-        artifactId: '73',
+        artifactId: '101',
     });
 });
