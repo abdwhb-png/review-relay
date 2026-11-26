@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.4.0 candidate:** native PR-Agent assessments, collapsible OpenCode reports and attributed pipeline measurements. See [candidate qualification](docs/qualification.md#version-140-candidate) for executed checks and their boundaries. A stable tag has not been published.
+**Version 1.4.0:** native PR-Agent assessments, collapsible OpenCode reports and attributed pipeline measurements. See [qualification](docs/qualification.md#version-140) for executed checks and their boundaries.
 
 ## Agent skill
 
