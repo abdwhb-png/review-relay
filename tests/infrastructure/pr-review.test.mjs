@@ -105,15 +105,19 @@ const endpoint = process.argv[3];
 const fixtureRun = {id:900,head_sha:process.env.GITHUB_WORKFLOW_SHA,event:'issue_comment',head_branch:'main',path:process.env.FIXTURE_WRONG_WORKFLOW || '.github/workflows/custom.yml',repository:{full_name:process.env.GITHUB_REPOSITORY},head_repository:{full_name:process.env.GITHUB_REPOSITORY}};
 const artifactPages = JSON.parse(process.env.FIXTURE_ARTIFACT_PAGES || JSON.stringify([{artifacts:[{id:70,name:process.env.FIXTURE_ARTIFACT_NAME || 'reviewrelay-analyze-42-1',expired:false}]}])).map(page=>({...page,artifacts:page.artifacts.map(a=>({workflow_run:{id:900},...a}))}));
 if (process.env.FIXTURE_NO_METADATA && (endpoint.endsWith('/artifacts/70') || endpoint.endsWith('/actions/runs/900'))) process.exit(77);
-if (endpoint.endsWith('/artifacts/70/zip')) {
-    const result=require('node:child_process').spawnSync('python3',['-c','import os,sys,zipfile; z=zipfile.ZipFile(sys.stdout.buffer, "w"); root=sys.argv[1]; [z.write(os.path.join(root,n),n) for n in os.listdir(root)]; z.close()',process.env.FIXTURE_ARCHIVE_DIR || process.env.FIXTURE_PREVIOUS_DIR]);
+if (endpoint.endsWith('/zip')) {
+    const id = endpoint.split('/').at(-2);
+    const archive = JSON.parse(process.env.FIXTURE_ARCHIVES || '{}')[id] || process.env.FIXTURE_ARCHIVE_DIR || process.env.FIXTURE_PREVIOUS_DIR;
+    const result=require('node:child_process').spawnSync('python3',['-c','import os,sys,zipfile; z=zipfile.ZipFile(sys.stdout.buffer, "w"); root=sys.argv[1]; [z.write(os.path.join(root,n),n) for n in os.listdir(root)]; z.close()',archive]);
     process.stdout.write(result.stdout);process.exit(result.status);
 }
-if (endpoint.endsWith('/artifacts/70')) {
-    console.log(JSON.stringify({id:70,expired:false,workflow_run:{id:900}}));process.exit(0);
+if (/\\/artifacts\\/[0-9]+$/.test(endpoint)) {
+    const id = Number(endpoint.split('/').at(-1));
+    console.log(JSON.stringify({id,expired:false,workflow_run:{id:id === 70 ? 900 : Number(process.env.GITHUB_RUN_ID)}}));process.exit(0);
 }
-if (endpoint.endsWith('/actions/runs/900')) {
-    console.log(JSON.stringify({id:900,event:process.env.FIXTURE_SOURCE_EVENT || 'issue_comment',head_branch:'main',path:process.env.FIXTURE_WRONG_WORKFLOW || '.github/workflows/custom.yml',head_sha:process.env.FIXTURE_SOURCE_EVENT === 'pull_request_target' ? process.env.HEAD_SHA : process.env.GITHUB_WORKFLOW_SHA,repository:{full_name:process.env.GITHUB_REPOSITORY},head_repository:{full_name:process.env.GITHUB_REPOSITORY}}));process.exit(0);
+if (/\\/actions\\/runs\\/[0-9]+$/.test(endpoint)) {
+    const id = Number(endpoint.split('/').at(-1));
+    console.log(JSON.stringify({id,event:process.env.FIXTURE_SOURCE_EVENT || 'issue_comment',head_branch:'main',path:process.env.FIXTURE_WRONG_WORKFLOW || '.github/workflows/custom.yml',head_sha:process.env.FIXTURE_SOURCE_EVENT === 'pull_request_target' ? process.env.HEAD_SHA : process.env.GITHUB_WORKFLOW_SHA,repository:{full_name:process.env.GITHUB_REPOSITORY},head_repository:{full_name:process.env.GITHUB_REPOSITORY}}));process.exit(0);
 }
 if(endpoint.endsWith('/permission')) { console.log(JSON.stringify({permission:process.env.FIXTURE_PERMISSION || 'write'}));process.exit(0); }
 if (endpoint.includes('/commits/') && endpoint.includes('/check-runs?')) {
@@ -136,8 +140,13 @@ if (endpoint.endsWith('/reviews')) {
     fs.appendFileSync('published', review + '\\n');
     console.log(JSON.stringify({state:'COMMENTED',commit_id:JSON.parse(review).commit_id,html_url:'https://github.com/fixture/review'}));
 } else if (endpoint.includes('/actions/workflows/')) console.log(JSON.stringify([{workflow_runs:JSON.parse(process.env.FIXTURE_RUNS || '{"workflow_runs":[]}').workflow_runs.map(r=>({...fixtureRun,...r}))}]));
-else if (endpoint.includes('/artifacts?')) console.log(JSON.stringify(artifactPages));
+else if (endpoint.includes('/artifacts?')) {
+    const id = Number(endpoint.split('/').at(-2));
+    const forRun = JSON.parse(process.env.FIXTURE_RUN_ARTIFACTS || '{}')[id];
+    console.log(JSON.stringify(forRun ? [{ artifacts: forRun.map((artifactId) => ({id: artifactId,name:'reviewrelay-analyze-42-1',expired:false,workflow_run:{id}})) }] : artifactPages));
+}
 else if (endpoint.endsWith('/issues/42/comments')) {
+    if (process.env.FIXTURE_REFERENCE_FAILURE) process.exit(1);
     fs.appendFileSync('reference-calls','1'); fs.writeFileSync('reference',fs.readFileSync(0,'utf8')); console.log('{"id":3}');
 } else console.log(process.env.FIXTURE_PULL);
 `,
@@ -158,6 +167,10 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
         const paths=execFileSync('git',['diff','--no-renames','--name-only',process.env.BASE_SHA+'...'+process.env.HEAD_SHA],{encoding:'utf8'}).trim().split('\\n');
         const ignore=[...JSON.parse(process.env.IGNORE__REGEX || '[]'),...JSON.parse(process.env.REVIEW_EXCLUDED_REGEX || '[]')].map(x=>new RegExp(x));
         const scope=process.env.REVIEW_FULL==='true' ? null : process.env.FIXTURE_NATIVE_SCOPE;
+        if (scope && process.env.FIXTURE_SCOPE_BASE) {
+            console.log(JSON.stringify({...JSON.parse(scope),start:process.env.BASE_SHA}));
+            process.exit(0);
+        }
         console.log(process.env.REVIEW_SCOPE || scope || JSON.stringify({incremental:false,start:process.env.BASE_SHA,first:null,paths:paths.filter(p=>p && !ignore.some(r=>r.test(p))).sort()}));
     } else if (args.at(-1)==='publish-suggestions') {
         fs.writeFileSync('suggestion-publications',fs.readFileSync(mount('/output')+'/suggestions.json','utf8'));
@@ -177,6 +190,10 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
 } else if (args.includes('--standalone')) {
     fs.appendFileSync('provider-calls', 'opencode\\n');
     const src = mount('/review');
+    if (fs.existsSync(src + '/reviewrelay-checkpoint.json')) {
+        fs.copyFileSync(src + '/reviewrelay-checkpoint.json', 'checkpoint-evidence');
+        fs.copyFileSync(src + '/reviewrelay-publication.diff', 'publication-diff');
+    }
     fs.copyFileSync(src + '/reviewrelay-review.diff', 'opencode.diff');
     fs.copyFileSync(src + '/.missions/one/evidence/archive.patch', 'archived-proof');
     fs.writeFileSync('opencode-arguments',JSON.stringify(args));
@@ -321,7 +338,7 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
     assert.match(compatibility.engine, /^[a-f0-9]{64}$/);
     assert.match(configurationSha256, /^[a-f0-9]{64}$/);
     assert.deepEqual(payload, {
-        schemaVersion: 3,
+        schemaVersion: 4,
         kind: 'analysis',
         instructionPaths: [],
         repository: repo,
@@ -349,6 +366,9 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
             'opencode-report.md': createHash('sha256').update(report).digest('hex'),
         },
         diffSha256: createHash('sha256').update(diff).digest('hex'),
+        diffOrigin: baseSha,
+        inspection: { start: baseSha, diffSha256: createHash('sha256').update(diff).digest('hex') },
+        checkpoint: null,
     });
 
     const synthesize = (overrides = {}) =>
@@ -1052,7 +1072,7 @@ await test('analysis reuse rejects effective configuration changes and synthesis
     assert.equal(result.status, 0, result.stderr);
     assert.equal(outputs().review, undefined, 'reports must not pass through job outputs');
     const manifest = JSON.parse(readFileSync(join(outputs().reports, 'manifest.json'), 'utf8'));
-    assert.equal(manifest.schemaVersion, 3);
+    assert.equal(manifest.schemaVersion, 4);
     assert.equal(manifest.kind, 'synthesis');
     assert.equal(manifest.producer.runId, '900');
 });
@@ -1800,7 +1820,7 @@ await test('named stream artifacts and publication retain their authorized ident
     assert.equal(analysis.status, 0, analysis.stderr);
     const artifact = outputs().reports;
     const manifest = JSON.parse(readFileSync(join(artifact, 'manifest.json'), 'utf8'));
-    assert.equal(manifest.schemaVersion, 3);
+    assert.equal(manifest.schemaVersion, 4);
     assert.equal(manifest.reviewId, 'localization');
     const nativeAnchor = '## PR Reviewer Guide 🔍\n\n<!-- pr-agent:review:full -->';
     const synthesis = run('synthesize', {
@@ -2390,4 +2410,253 @@ await test('publication refuses incomplete analysis or invalid source references
         assert.ok(!readdirSync(fixture).includes('published'));
         assert.ok(!readdirSync(fixture).includes('reference'));
     }
+});
+
+await test('descendant analysis continues before any native reference', (t) => {
+    const { run, outputs, read, write, git, expectedPull, headSha } = reviewFixture(t);
+    const initial = run('analyze');
+    assert.equal(initial.status, 0, initial.stderr);
+    const previous = outputs().reports;
+
+    write('app.txt', 'Product change\nFollow-up change\n');
+    git('commit', '-qam', 'Follow-up');
+    const nextHead = git('rev-parse', 'HEAD');
+    const continuation = {
+        HEAD_SHA: nextHead,
+        GITHUB_RUN_ID: '901',
+        FIXTURE_PULL: JSON.stringify({
+            ...expectedPull,
+            head: { ...expectedPull.head, sha: nextHead },
+        }),
+        FIXTURE_RUNS: JSON.stringify({ workflow_runs: [{ id: 900, conclusion: 'failure' }] }),
+        FIXTURE_PREVIOUS_DIR: previous,
+    };
+    const resumed = run('analyze', continuation);
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const reports = outputs().reports;
+    const manifest = JSON.parse(readFileSync(join(reports, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.scope.incremental, false);
+    assert.equal(manifest.checkpoint?.artifactId, '70');
+    assert.equal(manifest.inspection.start, headSha);
+    assert.match(read('session-imports'), /Previous context/);
+    assert.doesNotMatch(read('opencode.diff'), /^\+Product change/m);
+    assert.match(read('opencode.diff'), /^\+Follow-up change/m);
+    const synthesized = run('synthesize', { ...continuation, OPENCODE_REPORT_DIR: reports });
+    assert.equal(synthesized.status, 0, synthesized.stderr);
+    assert.match(read('pr-agent.diff'), /^\+Product change/m);
+    assert.equal(
+        manifest.diffSha256,
+        createHash('sha256').update(read('pr-agent.diff')).digest('hex'),
+    );
+    assert.equal(
+        manifest.inspection.diffSha256,
+        createHash('sha256').update(read('opencode.diff')).digest('hex'),
+    );
+    assert.deepEqual(manifest.execution.tokens, {
+        input: 11,
+        output: 7,
+        reasoning: 3,
+        cache: { read: 101, write: 0 },
+    });
+});
+
+function archivedAnalysis(t, options = {}, initial = {}) {
+    const fixture = reviewFixture(t, options);
+    const { run, outputs, expectedPull, headSha } = fixture;
+    const result = run('analyze', initial);
+    assert.equal(result.status, 0, result.stderr);
+    const previous = outputs().reports;
+    const request = (head = headSha, overrides = {}) => ({
+        ...initial,
+        HEAD_SHA: head,
+        GITHUB_RUN_ID: '901',
+        FIXTURE_PULL: JSON.stringify({
+            ...expectedPull,
+            head: { ...expectedPull.head, sha: head },
+        }),
+        FIXTURE_RUNS: JSON.stringify({ workflow_runs: [{ id: 900, conclusion: 'failure' }] }),
+        FIXTURE_PREVIOUS_DIR: previous,
+        ...overrides,
+    });
+    const manifest = () =>
+        JSON.parse(readFileSync(join(outputs().reports, 'manifest.json'), 'utf8'));
+    return { ...fixture, previous, request, manifest };
+}
+
+await test('descendant analysis consolidates an excluded-only change', (t) => {
+    const support = '.missions/one/evidence/browser.json';
+    const { run, outputs, read, write, git, request, manifest } = archivedAnalysis(
+        t,
+        {},
+        {
+            PR_REVIEW_EXCLUDE_GLOBS: JSON.stringify([support]),
+        },
+    );
+    write(support, 'Current supporting evidence\n');
+    git('commit', '-qam', 'Change supporting evidence');
+    const next = request(git('rev-parse', 'HEAD'));
+    const result = run('analyze', next);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(outputs().skipped, undefined);
+    assert.equal(read('opencode.diff'), '');
+    assert.equal(manifest().inspection.diffSha256, createHash('sha256').digest('hex'));
+    assert.deepEqual(JSON.parse(read('checkpoint-evidence')).changedPaths, [support]);
+    assert.equal(JSON.parse(read('snapshot'))[support], 'Current supporting evidence\n');
+    const synth = run('synthesize', { ...next, OPENCODE_REPORT_DIR: outputs().reports });
+    assert.equal(synth.status, 0, synth.stderr);
+    assert.match(read('pr-agent.diff'), /^\+Product change/m);
+    assert.equal(read('pr-agent.diff'), read('publication-diff'));
+});
+
+await test('descendant analysis honors the trusted stream mode and overrides', (t) => {
+    const config = { reviewId: 'localization', analysisResumeMode: 'full' };
+    const { run, outputs, read, write, git, request, manifest } = archivedAnalysis(
+        t,
+        { files: { 'localization.json': JSON.stringify(config) } },
+        {
+            REVIEW_CONFIG_PATH: 'localization.json',
+            FIXTURE_ARTIFACT_NAME: 'reviewrelay-analyze-42-localization-1',
+        },
+    );
+    write('app.txt', 'Product change\nFollow-up change\n');
+    git('commit', '-qam', 'Follow-up');
+    const head = git('rev-parse', 'HEAD');
+    const result = run('analyze', request(head));
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(manifest().reviewId, 'localization');
+    assert.equal(manifest().inspection.start, manifest().diffOrigin);
+    assert.match(read('session-imports'), /Previous context/);
+    assert.equal(read('opencode.diff'), read('publication-diff'));
+    const synth = run('synthesize', { ...request(head), OPENCODE_REPORT_DIR: outputs().reports });
+    assert.equal(synth.status, 0, synth.stderr);
+    assert.equal(read('opencode.diff'), read('pr-agent.diff'));
+    const overridden = run(
+        'analyze',
+        request(head, { REVIEW_OVERRIDES: '{"analysisResumeMode":"delta"}' }),
+    );
+    assert.equal(overridden.status, 0, overridden.stderr);
+    assert.equal(
+        manifest().checkpoint,
+        null,
+        'changed effective mode must invalidate the full-mode archive',
+    );
+    const calls = read('provider-calls');
+    const invalid = run(
+        'analyze',
+        request(head, { REVIEW_OVERRIDES: '{"analysisResumeMode":"fast"}' }),
+    );
+    assert.equal(invalid.status, 1);
+    assert.equal(read('provider-calls'), calls);
+});
+
+await test('descendant analysis checks prefix coverage for newly admitted paths', (t) => {
+    const { run, git, write, read, request, manifest, baseSha } = archivedAnalysis(
+        t,
+        {},
+        {
+            FIXTURE_NATIVE_SCOPE: JSON.stringify({
+                incremental: false,
+                start: null,
+                first: null,
+                paths: ['app.txt'],
+            }),
+            FIXTURE_SCOPE_BASE: 'true',
+        },
+    );
+    write('app.txt', 'Product change\nFollow-up change\n');
+    git('commit', '-qam', 'Follow-up');
+    const result = run(
+        'analyze',
+        request(git('rev-parse', 'HEAD'), {
+            FIXTURE_SCOPE_BASE: '',
+            FIXTURE_NATIVE_SCOPE: JSON.stringify({
+                incremental: false,
+                start: baseSha,
+                first: null,
+                paths: ['app.txt', '.missions/one/spec.md'],
+            }),
+        }),
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(manifest().checkpoint, null);
+    assert.match(read('opencode.diff'), /Mission contract/);
+    assert.match(result.stdout, /usable history and coverage/);
+});
+
+await test('descendant analysis uses the effective origin with an off-branch target tip', (t) => {
+    const { run, git, write, outputs, baseSha, headSha, expectedPull } = reviewFixture(t);
+    git('checkout', '--detach', baseSha);
+    write('target.txt', 'Target only\n');
+    git('add', 'target.txt');
+    git('commit', '-qm', 'Advance target');
+    const target = git('rev-parse', 'HEAD');
+    git('checkout', '--detach', headSha);
+    const request = (head, options = {}) => ({
+        BASE_SHA: target,
+        HEAD_SHA: head,
+        FIXTURE_PULL: JSON.stringify({
+            ...expectedPull,
+            base: { ...expectedPull.base, sha: target },
+            head: { ...expectedPull.head, sha: head },
+        }),
+        ...options,
+    });
+    const initial = run('analyze', request(headSha));
+    assert.equal(initial.status, 0, initial.stderr);
+    const previous = outputs().reports;
+    const history = {
+        GITHUB_RUN_ID: '901',
+        FIXTURE_RUNS: JSON.stringify({ workflow_runs: [{ id: 900 }] }),
+        FIXTURE_PREVIOUS_DIR: previous,
+    };
+    write('app.txt', 'Product change\nAdvance head\n');
+    git('commit', '-qam', 'Advance head');
+    const resumed = run('analyze', request(git('rev-parse', 'HEAD'), history));
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const manifest = () =>
+        JSON.parse(readFileSync(join(outputs().reports, 'manifest.json'), 'utf8'));
+    assert.equal(manifest().diffOrigin, baseSha);
+    assert.equal(manifest().checkpoint.head, headSha);
+
+    git('merge', '--no-edit', target);
+    const merged = run('analyze', request(git('rev-parse', 'HEAD'), history));
+    assert.equal(merged.status, 0, merged.stderr);
+    assert.equal(manifest().diffOrigin, target);
+    assert.equal(manifest().checkpoint, null);
+    assert.match(merged.stdout, /usable history and coverage/);
+});
+
+await test('descendant analysis selects progress before run recency and fails for selected corruption', (t) => {
+    const { run, git, write, read, outputs, request, previous, manifest } = archivedAnalysis(t);
+    write('app.txt', 'Product change\nSecond change\n');
+    git('commit', '-qam', 'Second change');
+    const second = run('analyze', request(git('rev-parse', 'HEAD')));
+    assert.equal(second.status, 0, second.stderr);
+    const secondArchive = outputs().reports;
+
+    write('app.txt', 'Product change\nSecond change\nThird change\n');
+    git('commit', '-qam', 'Third change');
+    const runs = [
+        { id: 900, updated_at: '2026-11-26' },
+        { id: 901, updated_at: '2026-11-25' },
+    ];
+    const next = request(git('rev-parse', 'HEAD'), {
+        GITHUB_RUN_ID: '902',
+        FIXTURE_RUNS: JSON.stringify({ workflow_runs: runs }),
+        FIXTURE_ARCHIVES: JSON.stringify({ 70: previous, 71: secondArchive }),
+        FIXTURE_RUN_ARTIFACTS: JSON.stringify({ 900: [70], 901: [71] }),
+    });
+    const third = run('analyze', next);
+    assert.equal(third.status, 0, third.stderr);
+    assert.equal(manifest().checkpoint.artifactId, '71');
+
+    writeFileSync(join(secondArchive, 'opencode-report.md'), 'Corrupted report');
+    const calls = read('provider-calls');
+    const corrupted = run('analyze', {
+        ...next,
+        FIXTURE_RUNS: JSON.stringify({ workflow_runs: runs.reverse() }),
+    });
+    assert.equal(corrupted.status, 1);
+    assert.match(corrupted.stderr, /Artifact payload checksum mismatch/);
+    assert.equal(read('provider-calls'), calls);
 });

@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { api } from './github-actions.mjs';
 import { credentialName, nativeValue } from './configuration.mjs';
 
-export const artifactSchemaVersion = 3;
+export const artifactSchemaVersion = 4;
 
 export const runtime = JSON.parse(
     readFileSync(new URL('../runtime.json', import.meta.url), 'utf8'),
@@ -134,20 +134,24 @@ export function writeManifest(directory, kind, config, metadata = {}) {
     return manifest;
 }
 
-export function readManifest(directory, kind, config, { previousHead } = {}) {
+export function matchesArchiveIdentity(manifest, kind, config, { previousHead } = {}) {
+    const expected = archiveIdentity(config);
+    if (previousHead) expected.head = previousHead;
+    return (
+        manifest?.schemaVersion === artifactSchemaVersion &&
+        manifest.kind === kind &&
+        Object.entries(expected).every(
+            ([key, value]) =>
+                JSON.stringify(canonical(manifest[key])) === JSON.stringify(canonical(value)),
+        )
+    );
+}
+
+export function readManifest(directory, kind, config, revision) {
     const path = join(directory, 'manifest.json');
     if (!lstatSync(path).isFile()) throw new Error('Manifest must be a regular file.');
     const manifest = JSON.parse(readFileSync(path, 'utf8'));
-    const expected = archiveIdentity(config);
-    if (previousHead) expected.head = previousHead;
-    if (
-        manifest.schemaVersion !== artifactSchemaVersion ||
-        manifest.kind !== kind ||
-        Object.entries(expected).some(
-            ([key, value]) =>
-                JSON.stringify(canonical(manifest[key])) !== JSON.stringify(canonical(value)),
-        )
-    )
+    if (!matchesArchiveIdentity(manifest, kind, config, revision))
         throw new Error('Artifact revision, configuration, or engine compatibility mismatch.');
     if (!Object.hasOwn(payloads, kind)) throw new Error('Unknown artifact kind.');
     const names = payloads[kind];
