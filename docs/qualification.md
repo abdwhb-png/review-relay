@@ -6,7 +6,24 @@ Candidate `7e85b6a777c6d3314f841a1092eaa22ee49c9b70` passed 74 infrastructure te
 
 The deterministic operation tests cover same-head payload reuse, descendant checkpoint coverage and ordering, excluded-only changes, stale revisions, corrupted archives, and duplicate-publication recovery. Targeted mutations confirmed that the tests catch a missing prefix check, disabled checksum verification, missing publication deduplication and missing consolidation guidance.
 
-Hosted qualification is pending for both the reusable workflow and composed action. The private qualification repository has no configured Actions model-provider secret. Real-model finding retention, removal and discovery, the excluded-context result, and the frozen-input time and token comparison remain unverified.
+A private qualification consumer ran both the reusable workflow in `delta` mode and the composed action in `full` mode with real OpenCode Go inference. Both callers archived analysis before controlled synthesis authentication failures. At the same head, each new request reused the exact report and session payloads with the original producer identity and zero new OpenCode invocations. Each published review and native reference used the correct frozen commit and archive marker. Publisher-only replays retained the original review and reference IDs and bodies. Both subsequent requests on that published head skipped synthesis and publication.
+
+Both descendant runs imported their own stream's session and retained its earlier messages. The reusable path inspected the C1→C2 delta, and the composed path inspected the complete publication range. Independent Git reconstruction matched the archived diff digests, and new session messages accounted for the reported invocation tokens. Both resumed reports retained a still-valid finding at its new location, excluded the corrected finding from current defects, and identified the newly introduced defect at its current location. Fresh runs on the same frozen base and head, with the same scope and per-interface settings, found the same two C2 defects.
+
+| OpenCode analysis | Seconds | Input tokens | Output tokens | Reasoning tokens | Cache read tokens |
+| ----------------- | ------: | -----------: | ------------: | ---------------: | ----------------: |
+| Reusable, fresh   |   35.94 |        6,466 |         1,449 |            1,319 |            16,768 |
+| Reusable, delta   |   25.64 |        8,296 |         1,178 |              560 |            41,472 |
+| Composed, fresh   |   56.67 |        8,571 |         1,518 |            3,906 |            26,752 |
+| Composed, full    |   27.93 |        5,543 |         1,157 |              465 |            29,568 |
+
+Each row is one observed OpenCode invocation. Cache write counts were zero. These paired runs measure the seeded fixture. The reusable delta used more input and cache read tokens than its fresh baseline, despite the shorter observed duration.
+
+In the excluded-only runs, both OpenCode reports used the changed supporting context to remove the earlier mismatch from current findings. The reusable run archived the digest of an empty primary delta and still published on C2. Native PR-Agent synthesis independently flagged a remaining conditional policy-handling weakness. The native synthesis reports described the failure that would recur under a future policy change. Post-publication requests in both streams produced zero artifacts.
+
+Runner logs confirmed both interfaces used read-only PR access for analysis and synthesis and write access for publication. Publisher jobs received no model credentials.
+
+The controlled revision-advance probes rejected stale synthesis and publication after valid C1 analysis. The stale-synthesis PR recovered on C2 using its C1 checkpoint. Its first C2 synthesis attempt failed with an unspecified GitHub API error. Retrying failed jobs completed synthesis and publication from the same C2 analysis archive. Consumer source, raw reports, sessions, run logs and artifact evidence remain private.
 
 ## Version 1.4.0
 
