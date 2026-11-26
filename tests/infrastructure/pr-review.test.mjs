@@ -2756,7 +2756,8 @@ await test('same-head analysis does not duplicate a published review with a miss
 });
 
 await test('descendant analysis falls back for expired, incompatible or unrelated history', (t) => {
-    const { fixture, run, read, write, git, request, manifest, baseSha } = archivedAnalysis(t);
+    const { fixture, run, read, write, git, request, manifest, baseSha, previous } =
+        archivedAnalysis(t);
     write('app.txt', 'Product change\nFollow-up change\n');
     git('commit', '-qam', 'Follow-up');
     const advanced = git('rev-parse', 'HEAD');
@@ -2783,6 +2784,16 @@ await test('descendant analysis falls back for expired, incompatible or unrelate
         assert.match(result.stdout, /usable history and coverage/);
         assert.ok(!JSON.parse(read('opencode-arguments')).includes('--session'));
     }
+
+    const path = join(previous, 'manifest.json');
+    const incompatible = JSON.parse(readFileSync(path, 'utf8'));
+    incompatible.compatibility.engine = '1'.repeat(64);
+    writeFileSync(path, JSON.stringify(incompatible));
+    const changedEngine = run('analyze', request(advanced));
+    assert.equal(changedEngine.status, 0, changedEngine.stderr);
+    assert.equal(manifest().checkpoint, null);
+    assert.match(changedEngine.stdout, /usable history and coverage/);
+    assert.ok(!JSON.parse(read('opencode-arguments')).includes('--session'));
 });
 
 await test('same-head analysis requires identical scope and leaves stale work archived', (t) => {
