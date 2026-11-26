@@ -3,7 +3,7 @@ name: review-relay
 description: Use when adopting, configuring, operating, upgrading, or troubleshooting ReviewRelay in a GitHub repository. Do not use for general code review or ReviewRelay engine development.
 license: Apache-2.0
 metadata:
-    version: '1.4.0'
+    version: '1.5.0'
 ---
 
 # ReviewRelay

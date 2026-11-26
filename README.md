@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.4.0:** native PR-Agent assessments, collapsible OpenCode reports and attributed pipeline measurements. See [qualification](docs/qualification.md#version-140) for executed checks and their boundaries.
+**Version 1.5.0:** recover completed unpublished OpenCode analysis on the same commit or a compatible descendant. See [qualification](docs/qualification.md#version-150) for executed checks and their boundaries.
 
 ## Agent skill
 
