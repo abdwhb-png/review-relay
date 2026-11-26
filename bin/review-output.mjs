@@ -2,7 +2,9 @@ const limit = 65536;
 const escape = (value) =>
     value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
-function analysisDetails(execution) {
+function analysisDetails(execution, reused) {
+    if (reused)
+        return `OpenCode analysis reused from run ${reused.runId}, attempt ${reused.attempt}, artifact ${reused.artifactId}. No OpenCode invocation in this request.`;
     if (!execution) return 'OpenCode measurements: unavailable.';
     const models = execution.models?.length ? execution.models.join(', ') : 'unavailable';
     const count = (value) => (Number.isFinite(value) && value >= 0 ? String(value) : 'unavailable');
@@ -40,7 +42,7 @@ export function composeReviewOutput(
             Number.isFinite(start) && now >= start
                 ? `${((now - start) / 1000).toFixed(1)}s`
                 : 'unavailable';
-        details = `\n\n<details>\n<summary>ReviewRelay pipeline details</summary>\n\n${analysisDetails(publication.execution?.analysis)}\n\nPR-Agent statistics belong to the native Agent run details section, when enabled. Its counters do not cover OpenCode.\n\nSynthesis pass duration (including retries): ${publication.execution?.synthesis ? `${publication.execution.synthesis.seconds.toFixed(1)}s` : 'unavailable'}.\n\nElapsed from run creation to publication preparation: ${elapsed} (includes job queues and retry waits).\n\n</details>`;
+        details = `\n\n<details>\n<summary>ReviewRelay pipeline details</summary>\n\n${analysisDetails(publication.execution?.analysis, publication.reusedAnalysis)}\n\nPR-Agent statistics belong to the native Agent run details section, when enabled. Its counters do not cover OpenCode.\n\nSynthesis pass duration (including retries): ${publication.execution?.synthesis ? `${publication.execution.synthesis.seconds.toFixed(1)}s` : 'unavailable'}.\n\nElapsed from run creation to publication preparation: ${elapsed} (includes job queues and retry waits).\n\n</details>`;
     }
     const suffix = `${details}\n\n${marker}`;
     const render = (report) => `${body}${report}${suffix}`;

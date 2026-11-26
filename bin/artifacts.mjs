@@ -28,6 +28,16 @@ export function digest(content) {
     return createHash('sha256').update(content).digest('hex');
 }
 
+export function validAnalysisSource(source) {
+    return (
+        typeof source?.head === 'string' &&
+        /^[0-9a-f]{40}$/.test(source.head) &&
+        [source.runId, source.attempt, source.artifactId].every(
+            (value) => typeof value === 'string' && /^[1-9][0-9]*$/.test(value),
+        )
+    );
+}
+
 export function publicationMarker(directory) {
     return `<!-- reviewrelay:${digest(readFileSync(join(directory, 'manifest.json')))} -->`;
 }
@@ -213,7 +223,10 @@ export function downloadArtifact(id, work, metadata) {
     } finally {
         closeSync(file);
     }
-    if (result.status !== 0) throw new Error('Cannot download the identified artifact.');
+    if (result.status !== 0) {
+        if (metadata && /\(HTTP (404|410)\)/.test(result.stderr?.toString() ?? '')) return null;
+        throw new Error('Cannot download the identified artifact.');
+    }
     const script = `import json, pathlib, stat, sys, zipfile
 allowed = set(json.loads(sys.argv[3]))
 with zipfile.ZipFile(sys.argv[1]) as archive:

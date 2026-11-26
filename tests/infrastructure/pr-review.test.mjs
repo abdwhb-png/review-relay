@@ -106,6 +106,10 @@ const fixtureRun = {id:900,head_sha:process.env.GITHUB_WORKFLOW_SHA,event:'issue
 const artifactPages = JSON.parse(process.env.FIXTURE_ARTIFACT_PAGES || JSON.stringify([{artifacts:[{id:70,name:process.env.FIXTURE_ARTIFACT_NAME || 'reviewrelay-analyze-42-1',expired:false}]}])).map(page=>({...page,artifacts:page.artifacts.map(a=>({workflow_run:{id:900},...a}))}));
 if (process.env.FIXTURE_NO_METADATA && (endpoint.endsWith('/artifacts/70') || endpoint.endsWith('/actions/runs/900'))) process.exit(77);
 if (endpoint.endsWith('/zip')) {
+    if (process.env.FIXTURE_ZIP_GONE) {
+        console.error('gh: Gone (HTTP 410)');
+        process.exit(1);
+    }
     const id = endpoint.split('/').at(-2);
     const archive = JSON.parse(process.env.FIXTURE_ARCHIVES || '{}')[id] || process.env.FIXTURE_ARCHIVE_DIR || process.env.FIXTURE_PREVIOUS_DIR;
     const result=require('node:child_process').spawnSync('python3',['-c','import os,sys,zipfile; z=zipfile.ZipFile(sys.stdout.buffer, "w"); root=sys.argv[1]; [z.write(os.path.join(root,n),n) for n in os.listdir(root)]; z.close()',archive]);
@@ -186,7 +190,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     fs.appendFileSync('session-imports',fs.readFileSync(mount('/state')+'/previous-session.json','utf8')+'\\n');
     console.log('Imported session: ses_fixture');
 } else if (args.includes('export')) {
-    console.log(JSON.stringify({info:{id:'ses_fixture'},messages:[{type:'user',text:'Previous context fixture-gh-token'},{id:'end',type:'assistant',model:{providerID:'fixture',id:'review-model'},content:[{type:'text',text:process.env.FIXTURE_SANITIZED_EXPORT ? '[redacted:text:end]' : 'OpenCode report fixture-go-key'}]}]}));
+    console.log(JSON.stringify({info:{id:'ses_fixture'},messages:[{type:'user',text:'Previous context fixture-gh-token'},{id:'end',type:'assistant',model:{providerID:'fixture',id:'review-model'},content:[{type:'text',text:process.env.FIXTURE_SANITIZED_EXPORT ? '[redacted:text:end]' : (process.env.FIXTURE_ANALYSIS_REPORT || 'OpenCode report fixture-go-key')}]}]}));
 } else if (args.includes('--standalone')) {
     fs.appendFileSync('provider-calls', 'opencode\\n');
     const src = mount('/review');
@@ -199,7 +203,7 @@ if (args.includes('/opt/native.py') && !args.includes('generate')) {
     fs.writeFileSync('opencode-arguments',JSON.stringify(args));
     fs.writeFileSync('snapshot',JSON.stringify(Object.fromEntries(fs.readdirSync(src,{recursive:true}).filter(p=>fs.statSync(src+'/'+p).isFile() && !p.startsWith('.git/')).map(p=>[p,fs.readFileSync(src+'/'+p,'utf8')]))));
     fs.writeFileSync('opencode-inline-config',process.env.OPENCODE_CONFIG_CONTENT);
-    console.log(JSON.stringify({type:'text',sessionID:'ses_fixture',part:{messageID:'end',text:'OpenCode report fixture-go-key'}}));
+    console.log(JSON.stringify({type:'text',sessionID:'ses_fixture',part:{messageID:'end',text:process.env.FIXTURE_ANALYSIS_REPORT || 'OpenCode report fixture-go-key'}}));
     console.log(JSON.stringify({type:'step_finish',part:{reason:'stop',messageID:'end',tokens:{input:11,output:7,reasoning:3,cache:{read:101,write:0}}}}));
 } else {
     fs.appendFileSync('provider-calls', 'pr-agent\\n');
@@ -369,6 +373,7 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
         diffOrigin: baseSha,
         inspection: { start: baseSha, diffSha256: createHash('sha256').update(diff).digest('hex') },
         checkpoint: null,
+        reusedAnalysis: null,
     });
 
     const synthesize = (overrides = {}) =>
@@ -451,22 +456,6 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
             .summary,
         '[redacted]',
     );
-    const published = run('publish', {
-        REVIEW_REPORT_DIR: synthesis.reports,
-        PR_REVIEW_EXCLUDE_GLOBS: JSON.stringify(globs),
-    });
-    assert.equal(published.status, 0, published.stderr);
-    const sent = JSON.parse(read('published'));
-    assert.match(sent.body, /<!-- reviewrelay:[a-f0-9]{64} -->$/);
-    assert.deepEqual(
-        { ...sent, body: sent.body.split('\n\n<details>')[0] },
-        {
-            body: 'PR-Agent report [redacted]\n\nReview scope: 1 files excluded from the primary diff by the configured review globs.',
-            commit_id: headSha,
-            event: 'COMMENT',
-        },
-    );
-
     const custom = runReview('["app.*", ".missions/*/evidence/*.patch"]');
     assert.equal(custom.status, 0, custom.stderr);
     const customDiff = readFileSync(join(fixture, 'opencode.diff'), 'utf8');
@@ -504,6 +493,22 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
         'an export without the report text cannot establish resumable context',
     );
     assert.match(sanitized.stderr, /session export.*context/);
+
+    const published = run('publish', {
+        REVIEW_REPORT_DIR: synthesis.reports,
+        PR_REVIEW_EXCLUDE_GLOBS: JSON.stringify(globs),
+    });
+    assert.equal(published.status, 0, published.stderr);
+    const sent = JSON.parse(read('published'));
+    assert.match(sent.body, /<!-- reviewrelay:[a-f0-9]{64} -->$/);
+    assert.deepEqual(
+        { ...sent, body: sent.body.split('\n\n<details>')[0] },
+        {
+            body: 'PR-Agent report [redacted]\n\nReview scope: 1 files excluded from the primary diff by the configured review globs.',
+            commit_id: headSha,
+            event: 'COMMENT',
+        },
+    );
 
     write('app.txt', 'Product change\nFollow-up change\n');
     git('add', 'app.txt');
@@ -552,6 +557,22 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
     assert.equal(secondSynthesis.status, 0, secondSynthesis.stderr);
     assert.equal(read('pr-agent.diff'), read('opencode.diff'));
     const secondOutput = outputs();
+    const beforeCorruption = read('provider-calls');
+    const priorSessionPath = join(reports, 'opencode-session.json');
+    writeFileSync(priorSessionPath, 'Corrupted session');
+    const invalidSession = run('analyze', continuation);
+    assert.equal(invalidSession.status, 1);
+    assert.match(invalidSession.stderr, /Artifact payload checksum mismatch/);
+    assert.equal(read('provider-calls'), beforeCorruption);
+
+    const importedBeforeReset = read('session-imports');
+    const reset = run('analyze', { ...continuation, FIXTURE_RUNS: '{"workflow_runs":[]}' });
+    assert.equal(reset.status, 0, reset.stderr);
+    assert.match(reset.stdout, /No compatible archived OpenCode session.*complete review/);
+    assert.match(read('opencode.diff'), /Mission contract/);
+    assert.equal(read('session-imports'), importedBeforeReset);
+    assert.ok(!JSON.parse(read('opencode-arguments')).includes('--session'));
+
     assert.equal(
         run('publish', {
             ...continuation,
@@ -579,21 +600,6 @@ await test('the hybrid run reviews one filtered diff and reports each stage on t
         beforeSkip,
         'unchanged commits must not invoke either model',
     );
-
-    const priorSessionPath = join(reports, 'opencode-session.json');
-    writeFileSync(priorSessionPath, 'Corrupted session');
-    const invalidSession = run('analyze', continuation);
-    assert.equal(invalidSession.status, 1);
-    assert.match(invalidSession.stderr, /Artifact payload checksum mismatch/);
-    assert.equal(read('provider-calls'), beforeSkip);
-
-    const importedBeforeReset = read('session-imports');
-    const reset = run('analyze', { ...continuation, FIXTURE_RUNS: '{"workflow_runs":[]}' });
-    assert.equal(reset.status, 0, reset.stderr);
-    assert.match(reset.stdout, /No compatible archived OpenCode session.*complete review/);
-    assert.match(read('opencode.diff'), /Mission contract/);
-    assert.equal(read('session-imports'), importedBeforeReset);
-    assert.ok(!JSON.parse(read('opencode-arguments')).includes('--session'));
 });
 
 await test('manual review and suggestions stay available independently of the auto-review switch', () => {
@@ -2414,7 +2420,7 @@ await test('publication refuses incomplete analysis or invalid source references
 
 await test('descendant analysis continues before any native reference', (t) => {
     const { run, outputs, read, write, git, expectedPull, headSha } = reviewFixture(t);
-    const initial = run('analyze');
+    const initial = run('analyze', { FIXTURE_ANALYSIS_REPORT: 'Prior report on C1' });
     assert.equal(initial.status, 0, initial.stderr);
     const previous = outputs().reports;
 
@@ -2430,6 +2436,7 @@ await test('descendant analysis continues before any native reference', (t) => {
         }),
         FIXTURE_RUNS: JSON.stringify({ workflow_runs: [{ id: 900, conclusion: 'failure' }] }),
         FIXTURE_PREVIOUS_DIR: previous,
+        FIXTURE_ANALYSIS_REPORT: 'Consolidated report on C2',
     };
     const resumed = run('analyze', continuation);
     assert.equal(resumed.status, 0, resumed.stderr);
@@ -2438,12 +2445,14 @@ await test('descendant analysis continues before any native reference', (t) => {
     assert.equal(manifest.scope.incremental, false);
     assert.equal(manifest.checkpoint?.artifactId, '70');
     assert.equal(manifest.inspection.start, headSha);
-    assert.match(read('session-imports'), /Previous context/);
+    assert.match(read('session-imports'), /Prior report on C1/);
+    assert.equal(JSON.parse(read('checkpoint-evidence')).report, 'Prior report on C1\n');
     assert.doesNotMatch(read('opencode.diff'), /^\+Product change/m);
     assert.match(read('opencode.diff'), /^\+Follow-up change/m);
     const synthesized = run('synthesize', { ...continuation, OPENCODE_REPORT_DIR: reports });
     assert.equal(synthesized.status, 0, synthesized.stderr);
     assert.match(read('pr-agent.diff'), /^\+Product change/m);
+    assert.equal(read('pr-agent-input.md'), 'Consolidated report on C2\n');
     assert.equal(
         manifest.diffSha256,
         createHash('sha256').update(read('pr-agent.diff')).digest('hex'),
@@ -2659,4 +2668,208 @@ await test('descendant analysis selects progress before run recency and fails fo
     assert.equal(corrupted.status, 1);
     assert.match(corrupted.stderr, /Artifact payload checksum mismatch/);
     assert.equal(read('provider-calls'), calls);
+});
+
+await test('same-head analysis reuses verified payloads without another OpenCode call', (t) => {
+    const { run, outputs, read, request, manifest, previous, headSha } = archivedAnalysis(t);
+    const failed = run('synthesize', {
+        OPENCODE_REPORT_DIR: previous,
+        FIXTURE_SYNTHESIS_ERROR: 'RateLimitError: Daily quota exhausted',
+    });
+    assert.equal(failed.status, 1);
+    const overrides = request();
+    const action = { ...overrides, FIXTURE_ACTION: 'true' };
+    const auth = run('authorize', action);
+    assert.equal(auth.status, 0, auth.stderr);
+    action.REVIEW_REQUEST = outputs().request;
+    const reused = run('analyze', action);
+    assert.equal(reused.status, 0, reused.stderr);
+    const newArchive = outputs().reports;
+    assert.equal(manifest().execution, null);
+    assert.equal(manifest().inspection, null);
+    assert.deepEqual(manifest().reusedAnalysis, {
+        head: headSha,
+        runId: '900',
+        attempt: '1',
+        artifactId: '70',
+    });
+    assert.equal(manifest().producer.runId, '901');
+    for (const name of ['opencode-report.md', 'opencode-session.json'])
+        assert.deepEqual(readFileSync(join(newArchive, name)), readFileSync(join(previous, name)));
+    assert.equal(read('provider-calls'), 'opencode\npr-agent\n');
+    const reusedAgain = run(
+        'analyze',
+        request(headSha, {
+            GITHUB_RUN_ID: '902',
+            FIXTURE_RUNS: JSON.stringify({ workflow_runs: [{ id: 901 }] }),
+            FIXTURE_RUN_ARTIFACTS: JSON.stringify({ 901: [71] }),
+            FIXTURE_ARCHIVES: JSON.stringify({ 71: newArchive }),
+        }),
+    );
+    assert.equal(reusedAgain.status, 0, reusedAgain.stderr);
+    assert.equal(manifest().reusedAnalysis.runId, '900');
+    assert.equal(manifest().reusedAnalysis.artifactId, '70');
+    assert.equal(read('provider-calls'), 'opencode\npr-agent\n');
+    const synth = run('synthesize', {
+        ...action,
+        REVIEW_ARTIFACT_ID: '71',
+        FIXTURE_ARCHIVES: JSON.stringify({ 71: newArchive }),
+    });
+    assert.equal(synth.status, 0, synth.stderr);
+    const published = run('publish', {
+        ...action,
+        REVIEW_ARTIFACT_ID: '72',
+        FIXTURE_ARCHIVES: JSON.stringify({ 72: outputs().reports }),
+    });
+    assert.equal(published.status, 0, published.stderr);
+    const review = JSON.parse(read('published'));
+    assert.equal(review.commit_id, headSha);
+    assert.match(review.body, /reused.*run 900.*attempt 1/i);
+    assert.match(review.body, /runs\/901\/artifacts\/71/);
+    assert.doesNotMatch(review.body, /11 input|OpenCode route/);
+    assert.equal(read('provider-calls'), 'opencode\npr-agent\npr-agent\n');
+});
+
+await test('same-head analysis does not duplicate a published review with a missing reference', (t) => {
+    const { run, outputs, read, request, previous } = archivedAnalysis(t);
+    assert.equal(run('synthesize', { OPENCODE_REPORT_DIR: previous }).status, 0);
+    const original = outputs().reports;
+    const next = request();
+    assert.equal(run('analyze', next).status, 0);
+    assert.equal(run('synthesize', { ...next, OPENCODE_REPORT_DIR: outputs().reports }).status, 0);
+    const another = outputs().reports;
+    const partial = run('publish', { REVIEW_REPORT_DIR: original, FIXTURE_REFERENCE_FAILURE: '1' });
+    assert.equal(partial.status, 1);
+    assert.equal(read('published').trim().split('\n').length, 1);
+    const calls = read('provider-calls');
+    const skipped = run('analyze', next);
+    assert.equal(skipped.status, 0, skipped.stderr);
+    assert.equal(outputs().skipped, 'true');
+    assert.equal(read('provider-calls'), calls);
+    const duplicate = run('publish', { ...next, REVIEW_REPORT_DIR: another });
+    assert.equal(duplicate.status, 0, duplicate.stderr);
+    assert.equal(read('published').trim().split('\n').length, 1);
+    const replay = run('publish', { REVIEW_REPORT_DIR: original });
+    assert.equal(replay.status, 0, replay.stderr);
+    assert.equal(read('published').trim().split('\n').length, 1);
+    assert.equal(read('reference-calls'), '1');
+});
+
+await test('descendant analysis falls back for expired, incompatible or unrelated history', (t) => {
+    const { fixture, run, read, write, git, request, manifest, baseSha } = archivedAnalysis(t);
+    write('app.txt', 'Product change\nFollow-up change\n');
+    git('commit', '-qam', 'Follow-up');
+    const advanced = git('rev-parse', 'HEAD');
+    const cases = [
+        {
+            FIXTURE_ARTIFACT_PAGES: JSON.stringify([
+                { artifacts: [{ id: 70, name: 'reviewrelay-analyze-42-1', expired: true }] },
+            ]),
+        },
+        { FIXTURE_ZIP_GONE: '1' },
+        { PR_REVIEW_EXCLUDE_GLOBS: '["app.*"]' },
+    ];
+    git('checkout', '--detach', baseSha);
+    write('app.txt', 'Unrelated change\n');
+    mkdirSync(join(fixture, '.missions/one/evidence'), { recursive: true });
+    write('.missions/one/evidence/archive.patch', 'Supporting evidence\n');
+    git('add', 'app.txt', '.missions/one/evidence/archive.patch');
+    git('commit', '-qm', 'Unrelated change');
+    const unrelated = git('rev-parse', 'HEAD');
+    for (const env of [...cases.map((setting) => request(advanced, setting)), request(unrelated)]) {
+        const result = run('analyze', env);
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(manifest().checkpoint, null);
+        assert.match(result.stdout, /usable history and coverage/);
+        assert.ok(!JSON.parse(read('opencode-arguments')).includes('--session'));
+    }
+});
+
+await test('same-head analysis requires identical scope and leaves stale work archived', (t) => {
+    const { run, outputs, read, request, manifest, previous, baseSha, expectedPull } =
+        archivedAnalysis(t);
+    const next = request();
+    const stale = run('synthesize', {
+        ...next,
+        OPENCODE_REPORT_DIR: previous,
+        FIXTURE_PULL: JSON.stringify({
+            ...expectedPull,
+            head: { ...expectedPull.head, sha: baseSha },
+        }),
+    });
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /PR revision or eligibility changed/);
+    assert.equal(read('provider-calls'), 'opencode\n');
+    const changedScope = run('analyze', {
+        ...next,
+        FIXTURE_NATIVE_SCOPE: JSON.stringify({
+            incremental: false,
+            start: baseSha,
+            first: null,
+            paths: ['app.txt'],
+        }),
+    });
+    assert.equal(changedScope.status, 0, changedScope.stderr);
+    assert.equal(manifest().reusedAnalysis, null);
+    assert.notEqual(outputs().reports, previous);
+    assert.equal(read('provider-calls'), 'opencode\nopencode\n');
+});
+
+await test('descendant analysis breaks equal and incomparable checkpoint ties by artifact ID', (t) => {
+    const { run, outputs, write, git, request, manifest, headSha } = archivedAnalysis(t);
+    const independentArchive = (runId, attempt) => {
+        const result = run(
+            'analyze',
+            request(git('rev-parse', 'HEAD'), {
+                GITHUB_RUN_ID: runId,
+                GITHUB_RUN_ATTEMPT: attempt,
+                FIXTURE_RUNS: '{"workflow_runs":[]}',
+            }),
+        );
+        assert.equal(result.status, 0, result.stderr);
+        return outputs().reports;
+    };
+    write('app.txt', 'Product change\nLeft branch change\n');
+    git('commit', '-qam', 'Left branch');
+    const left = git('rev-parse', 'HEAD');
+    const firstAttempt = independentArchive('901', '1');
+    const secondAttempt = independentArchive('901', '2');
+
+    git('checkout', '--detach', headSha);
+    write('right.txt', 'Right branch change\n');
+    git('add', 'right.txt');
+    git('commit', '-qm', 'Right branch');
+    const right = git('rev-parse', 'HEAD');
+    const rightArchive = independentArchive('902', '1');
+    git('merge', '--no-edit', left);
+    const merged = git('rev-parse', 'HEAD');
+    const candidate = {
+        GITHUB_RUN_ID: '903',
+        FIXTURE_ARCHIVES: JSON.stringify({ 71: firstAttempt, 72: secondAttempt, 73: rightArchive }),
+        FIXTURE_RUNS: JSON.stringify({ workflow_runs: [{ id: 901 }, { id: 902 }] }),
+    };
+    const runAnalysis = (rightArtifacts) =>
+        run(
+            'analyze',
+            request(merged, {
+                ...candidate,
+                FIXTURE_RUN_ARTIFACTS: JSON.stringify({ 901: [72, 71], 902: rightArtifacts }),
+            }),
+        );
+    const equal = runAnalysis([]);
+    assert.equal(equal.status, 0, equal.stderr);
+    assert.deepEqual(manifest().checkpoint, {
+        head: left,
+        runId: '901',
+        attempt: '2',
+        artifactId: '72',
+    });
+    const incomparable = runAnalysis([73]);
+    assert.equal(incomparable.status, 0, incomparable.stderr);
+    assert.deepEqual(manifest().checkpoint, {
+        head: right,
+        runId: '902',
+        attempt: '1',
+        artifactId: '73',
+    });
 });

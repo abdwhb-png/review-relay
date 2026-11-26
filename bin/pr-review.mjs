@@ -10,6 +10,7 @@ import {
     downloadArtifact,
     workflowPath,
     publicationMarker,
+    validAnalysisSource,
 } from './artifacts.mjs';
 import {
     loadConfiguration,
@@ -524,21 +525,14 @@ function restoreReport(path) {
         if (process.env.REVIEW_ARTIFACT_ID)
             path = downloadArtifact(process.env.REVIEW_ARTIFACT_ID, reviewDirectory());
         if (!path) throw new Error('Missing artifact path.');
-        const manifest = readManifest(path, 'analysis', settings());
-        const report = readFileSync(join(path, reportName), 'utf8');
-        if (!report.trim()) throw new Error('Empty analysis report.');
-        const prepared = verifiedAnalysisDiff(manifest);
-        if (
-            JSON.stringify(settings().instructionPaths) !==
-            JSON.stringify(manifest.instructionPaths)
-        )
-            throw new Error('Shared instruction sources changed.');
+        const { manifest, report, publication } = readAnalysisArchive(path);
         return {
-            ...prepared,
+            ...publication,
             report,
             scope: manifest.scope,
             execution: manifest.execution,
             producer: manifest.producer,
+            reusedAnalysis: manifest.reusedAnalysis,
         };
     } catch (error) {
         output({ state: 'new-review-required' });
@@ -753,7 +747,8 @@ function isAncestor(ancestor, head) {
 }
 
 function checkpointHead(head) {
-    if (!sha.test(head ?? '') || head === process.env.HEAD_SHA) return false;
+    if (!sha.test(head ?? '')) return false;
+    if (head === process.env.HEAD_SHA) return true;
     const object = spawnSync('git', ['cat-file', '-t', head], { encoding: 'utf8' });
     if (object.status === 128 && object.stderr.includes('could not get object info')) return false;
     if (object.status !== 0)
@@ -771,17 +766,28 @@ function verifiedAnalysisDiff(manifest) {
         manifest.diffSha256 !== digest(publication.diff)
     )
         throw new Error('Reconstructed publication diff checksum mismatch.');
-    const { inspection, checkpoint } = manifest;
+    const { inspection, checkpoint, reusedAnalysis, execution } = manifest;
+    if (reusedAnalysis !== null) {
+        if (
+            !validAnalysisSource(reusedAnalysis) ||
+            reusedAnalysis.head !== manifest.head ||
+            execution !== null ||
+            inspection !== null ||
+            checkpoint !== null
+        )
+            throw new Error('Invalid reused analysis provenance.');
+        return publication;
+    }
     if (
         !sha.test(inspection?.start ?? '') ||
         !/^[0-9a-f]{64}$/.test(inspection.diffSha256 ?? '') ||
+        execution?.runId !== manifest.producer?.runId ||
+        execution?.attempt !== manifest.producer?.attempt ||
+        !execution ||
         (checkpoint !== null &&
-            (!sha.test(checkpoint?.head ?? '') ||
+            (!validAnalysisSource(checkpoint) ||
                 checkpoint.head === manifest.head ||
-                !isAncestor(checkpoint.head, manifest.head) ||
-                ![checkpoint.runId, checkpoint.attempt, checkpoint.artifactId].every(
-                    (value) => typeof value === 'string' && /^[1-9][0-9]*$/.test(value),
-                )))
+                !isAncestor(checkpoint.head, manifest.head)))
     )
         throw new Error('Invalid analysis inspection or checkpoint.');
     const delta = checkpoint && settings().analysisResumeMode === 'delta';
@@ -817,11 +823,14 @@ function analysisCheckpoints(work, globs) {
                 !reviewIdentity(settings().reviewId).analysisArtifactPattern.test(artifact.name)
             )
                 continue;
+            if (!Number.isSafeInteger(artifact.id) || artifact.id < 1)
+                throw new Error('Invalid discovered artifact ID.');
             const directory = downloadArtifact(artifact.id, work, { artifact, run });
+            if (!directory) continue;
             const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
             if (
                 !matchesArchiveIdentity(manifest, 'analysis', settings(), {
-                    previousHead: manifest.head,
+                    previousHead: manifest?.head,
                 }) ||
                 JSON.stringify(manifest.globs) !== JSON.stringify(globs) ||
                 JSON.stringify(manifest.instructionPaths) !==
@@ -838,6 +847,16 @@ function analysisCheckpoints(work, globs) {
 function selectCheckpoint(candidates, scope, publication) {
     if (publication.ambiguousOrigin) return null;
     const eligible = candidates.filter(({ manifest }) => {
+        if (manifest.head === process.env.HEAD_SHA) {
+            const archived = validateScope(manifest.scope);
+            return (
+                archived.incremental === scope.incremental &&
+                archived.start === scope.start &&
+                archived.first === scope.first &&
+                JSON.stringify([...new Set(archived.paths)].sort()) ===
+                    JSON.stringify([...new Set(scope.paths)].sort())
+            );
+        }
         validateScope(manifest.scope, manifest.head);
         if (scope.incremental && manifest.head === scope.start) return true;
         if (!isAncestor(publication.origin, manifest.head)) return false;
@@ -876,16 +895,38 @@ function selectCheckpoint(candidates, scope, publication) {
         );
 }
 
-function readCheckpoint(selected) {
-    const { directory, artifactId, manifest } = selected;
-    readManifest(directory, 'analysis', settings(), { previousHead: manifest.head });
-    verifiedAnalysisDiff(manifest);
+function readAnalysisArchive(directory, previousHead) {
+    const manifest = readManifest(directory, 'analysis', settings(), { previousHead });
+    const publication = verifiedAnalysisDiff(manifest);
+    if (JSON.stringify(manifest.instructionPaths) !== JSON.stringify(settings().instructionPaths))
+        throw new Error('Shared instruction sources changed.');
     const report = readFileSync(join(directory, reportName), 'utf8');
     const session = readFileSync(join(directory, 'opencode-session.json'), 'utf8');
     if (!report.trim() || !session.trim())
         throw new Error('Empty archived analysis report or session.');
-    const { runId, attempt } = manifest.producer;
-    return { report, session, source: { head: manifest.head, runId, attempt, artifactId } };
+    const transcript = JSON.parse(session);
+    if (
+        !/^[a-zA-Z0-9_-]+$/.test(manifest.sessionId ?? '') ||
+        transcript?.info?.id !== manifest.sessionId ||
+        !Array.isArray(transcript.messages)
+    )
+        throw new Error('Invalid archived OpenCode session.');
+    return { manifest, report, session, publication };
+}
+
+function readCheckpoint(selected) {
+    const { manifest, report, session } = readAnalysisArchive(
+        selected.directory,
+        selected.manifest.head,
+    );
+    const source = {
+        head: manifest.head,
+        runId: manifest.producer.runId,
+        attempt: manifest.producer.attempt,
+        artifactId: selected.artifactId,
+    };
+    if (!validAnalysisSource(source)) throw new Error('Invalid selected analysis producer.');
+    return { manifest, report, session, source };
 }
 
 function openCodeRuntime(provider, work, snapshot) {
@@ -1312,6 +1353,39 @@ function reviewDirectory() {
     return mkdtempSync(join(process.env.RUNNER_TEMP ?? tmpdir(), 'reviewrelay-review-'));
 }
 
+function archiveAnalysis(work, { report, session }, metadata) {
+    const reports = join(work, 'reports');
+    mkdirSync(reports);
+    writeFileSync(join(reports, reportName), report);
+    writeFileSync(join(reports, 'opencode-session.json'), session);
+    writeManifest(reports, 'analysis', settings(), metadata);
+    output({ reports });
+}
+
+function publishedReviews() {
+    const env = process.env;
+    const { marker } = reviewIdentity(settings().reviewId);
+    return api(`repos/${env.GITHUB_REPOSITORY}/pulls/${env.PR_NUMBER}/reviews`, [
+        '--paginate',
+        '--slurp',
+    ])
+        .flat()
+        .filter((review) => {
+            if (
+                review.user?.login !== 'github-actions[bot]' ||
+                review.state !== 'COMMENTED' ||
+                review.commit_id !== env.HEAD_SHA ||
+                typeof review.html_url !== 'string' ||
+                !/\n<!-- reviewrelay:[a-f0-9]{64} -->$/.test(review.body?.trimEnd() ?? '')
+            )
+                return false;
+            const firstLine = review.body.split('\n', 1)[0];
+            return marker
+                ? firstLine === marker
+                : !firstLine.startsWith('<!-- reviewrelay:stream:');
+        });
+}
+
 async function analyze() {
     updateReviewCheck(
         'Preparing the review',
@@ -1329,6 +1403,13 @@ async function analyze() {
         output({ skipped: true });
         return;
     }
+    if (publishedReviews().length) {
+        summary(
+            'This stream already published a review on this commit. Retry the original publisher if its native reference is missing.',
+        );
+        output({ skipped: true });
+        return;
+    }
     const candidates = analysisCheckpoints(work, globs);
     let publication = reviewDiff(globs, scope);
     let selected = selectCheckpoint(candidates, scope, publication);
@@ -1343,6 +1424,29 @@ async function analyze() {
         return;
     }
     const checkpoint = selected ? readCheckpoint(selected) : null;
+    const coverage = {
+        globs,
+        scope,
+        instructionPaths: settings().instructionPaths,
+        diffSha256: digest(publication.diff),
+        diffOrigin: publication.origin,
+    };
+    if (checkpoint?.source.head === process.env.HEAD_SHA) {
+        assertRevision();
+        const reusedAnalysis = checkpoint.manifest.reusedAnalysis ?? checkpoint.source;
+        summary(
+            `Reusing verified OpenCode analysis from run ${reusedAnalysis.runId}, attempt ${reusedAnalysis.attempt}; no OpenCode invocation.`,
+        );
+        archiveAnalysis(work, checkpoint, {
+            ...coverage,
+            sessionId: checkpoint.manifest.sessionId,
+            execution: null,
+            inspection: null,
+            checkpoint: null,
+            reusedAnalysis,
+        });
+        return;
+    }
     if (checkpoint)
         summary(
             `Resuming OpenCode session from run ${checkpoint.source.runId}, reviewed commit ${checkpoint.source.head}.`,
@@ -1386,29 +1490,32 @@ async function analyze() {
     const result = await reviewStage('OpenCode', (provider) =>
         openCodeAttempt(provider, work, { snapshot, evidence, session: checkpoint?.session }),
     );
-    const reports = join(work, 'reports');
-    mkdirSync(reports);
-    const report = `${redactReviewSecrets(result.report)}\n`;
-    writeFileSync(join(reports, reportName), report);
-    writeFileSync(join(reports, 'opencode-session.json'), result.session);
-    writeManifest(reports, 'analysis', settings(), {
-        globs,
-        scope,
-        instructionPaths: settings().instructionPaths,
-        sessionId: result.sessionId,
-        execution: result.execution,
-        diffSha256: digest(publication.diff),
-        diffOrigin: publication.origin,
-        inspection: { start: inspection.origin, diffSha256: digest(inspection.diff) },
-        checkpoint: checkpoint?.source ?? null,
-    });
-    output({ reports });
+    archiveAnalysis(
+        work,
+        { report: `${redactReviewSecrets(result.report)}\n`, session: result.session },
+        {
+            ...coverage,
+            sessionId: result.sessionId,
+            execution: result.execution,
+            inspection: { start: inspection.origin, diffSha256: digest(inspection.diff) },
+            checkpoint: checkpoint?.source ?? null,
+            reusedAnalysis: null,
+        },
+    );
 }
 
 async function synthesize() {
     assertRevision();
-    const { diff, excludedFiles, excludedPaths, report, scope, execution, producer } =
-        restoreReport(process.env.OPENCODE_REPORT_DIR);
+    const {
+        diff,
+        excludedFiles,
+        excludedPaths,
+        report,
+        scope,
+        execution,
+        producer,
+        reusedAnalysis,
+    } = restoreReport(process.env.OPENCODE_REPORT_DIR);
     const work = reviewDirectory();
     const input = join(work, 'input');
     mkdirSync(input);
@@ -1459,6 +1566,7 @@ async function synthesize() {
                     artifactId: process.env.REVIEW_ARTIFACT_ID || null,
                 },
                 execution: { analysis: execution, synthesis: result.execution },
+                reusedAnalysis,
             }),
         ),
     );
@@ -1524,21 +1632,26 @@ function publish() {
     if (typeof anchor !== 'string' || !anchor.trim() || Buffer.byteLength(anchor) > 2048)
         throw new Error('Invalid native review anchor.');
     const marker = publicationMarker(directory);
-    const previous = api(`repos/${env.GITHUB_REPOSITORY}/pulls/${env.PR_NUMBER}/reviews`, [
-        '--paginate',
-        '--slurp',
-    ])
-        .flat()
-        .filter(
-            (review) =>
-                review.user?.login === 'github-actions[bot]' &&
-                review.commit_id === env.HEAD_SHA &&
-                review.body?.includes(marker),
-        );
+    if (
+        publication.reusedAnalysis != null &&
+        (!validAnalysisSource(publication.reusedAnalysis) ||
+            publication.reusedAnalysis.head !== env.HEAD_SHA ||
+            publication.execution?.analysis !== null)
+    )
+        throw new Error('Invalid reused analysis provenance for publication.');
+    const reviews = publishedReviews();
+    const previous = reviews.filter((review) => review.body.trimEnd().endsWith(marker));
     if (previous.length > 1)
         throw new Error(
             'Ambiguous publication history; reconcile duplicate reviews before retrying.',
         );
+    if (!previous.length && reviews.length) {
+        summary(
+            'This stream already published a review on this commit. Retry the original publisher if its native reference is missing.',
+        );
+        output({ state: 'published', 'publication-url': reviews[0].html_url });
+        return;
+    }
     let publishedBody;
     if (!previous.length) {
         let createdAt;
@@ -1557,6 +1670,7 @@ function publish() {
             now: Date.now(),
         });
     }
+    assertRevision();
     const result =
         previous[0] ??
         api(
@@ -1582,6 +1696,7 @@ function publish() {
         );
     if (references.length > 1)
         throw new Error('Ambiguous native reference history; reconcile it before retrying.');
+    assertRevision();
     const reference =
         references[0] ??
         api(
