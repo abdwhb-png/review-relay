@@ -1,5 +1,13 @@
 # Release qualification
 
+## Unpublished analysis resumption candidate
+
+Candidate `7e85b6a777c6d3314f841a1092eaa22ee49c9b70` passed 74 infrastructure tests, the source and workflow checks, and the pinned-native fixtures. The OpenCode fixture verified retained session context, the consolidation instructions reaching the model transport, and tool reads of the empty primary diff, complete publication diff, and checkpoint evidence. The PR-Agent fixtures verified native scope, output and replay with a controlled GitHub transport.
+
+The deterministic operation tests cover same-head payload reuse, descendant checkpoint coverage and ordering, excluded-only changes, stale revisions, corrupted archives, and duplicate-publication recovery. Targeted mutations confirmed that the tests catch a missing prefix check, disabled checksum verification, missing publication deduplication and missing consolidation guidance.
+
+Hosted qualification is pending for both the reusable workflow and composed action. The private qualification repository has no configured Actions model-provider secret. Real-model finding retention, removal and discovery, the excluded-context result, and the frozen-input time and token comparison remain unverified.
+
 ## Version 1.4.0
 
 Runtime candidate `8a7421207f7d7dc646d3f4ebca2017501e0e8df9` passed hosted review-output qualification on 2026-11-26. Its [push CI](https://github.com/abdwhb-png/review-relay/actions/runs/45723350624) and [pull-request CI](https://github.com/abdwhb-png/review-relay/actions/runs/45723360902) passed source checks, actionlint, 61 infrastructure tests and seventeen pinned-native scenarios. Two additional infrastructure regressions bring the locally executed total to 63. Five temporary mutations were detected: missing report transfer, lost cache counters, broken report-size handling, coupled presentation controls and invalid artifact references. Native models, effort settings, dependency pins and generation/publication permissions are unchanged. Subsequent source changes contain documentation and regression tests only. The stable release contains this qualified runtime; release-only documentation changes do not alter engine compatibility.
