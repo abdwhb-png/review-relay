@@ -3,7 +3,7 @@ name: review-relay
 description: Use when adopting, configuring, operating, upgrading, or troubleshooting ReviewRelay in a GitHub repository. Do not use for general code review or ReviewRelay engine development.
 license: Apache-2.0
 metadata:
-    version: '1.4.0'
+    version: '1.5.0'
 ---
 
 # ReviewRelay
@@ -90,9 +90,9 @@ For an authorized live check, use an eligible same-repository PR and request one
 
 Use the caller's configured comment commands (default /review and /improve) from a user with current write, maintain or admin permission, or manual dispatch from the default branch with its PR-number input.
 
-After additional commits, request a new review to use native incremental review and compatible archived session continuation. A no-new-changes result should invoke no model. When qualifying continuation, create the additional commits after the preceding review completes. If a review restarts with full context, inspect native commit timestamps and artifact compatibility using the selected version’s README recovery guidance; preserve the project’s history and verification gates.
+After additional commits, request a new review. A compatible unpublished checkpoint can resume independently of the native publication anchor. The trusted per-stream `analysisResumeMode` defaults to `delta`, which focuses OpenCode on the newly changed range and supplies the complete native publication diff for consolidation. Choose `full` to reexamine that native scope with the imported session. Excluded-only changes still require consolidation when the publication diff remains. If a review restarts with full context, inspect native commit timestamps, coverage and artifact compatibility using the selected version's README recovery guidance.
 
-After synthesis failure, use GitHub's Re-run failed jobs on the same run to reuse completed analysis. If revisions or analysis configuration changed, start a new request.
+After synthesis failure, use GitHub's Re-run failed jobs on the same run. A new request on the same unpublished head also reuses verified compatible analysis without another OpenCode call. Changed revisions or analysis settings require a new request. For a published head with a missing reference, retry the original publisher to reconcile it.
 
 For publication failure, inspect the failed stage and retry its existing artifact rather than repeating inference. Preserve provenance checks and publication markers.
 

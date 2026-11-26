@@ -1,6 +1,7 @@
 {
     "reviewId": "localization",
     "autoReview": true,
+    "analysisResumeMode": "full",
     "prAgentConfigPath": ".pr_agent.localization.toml",
     "instructionSources": ["docs/localization.md"]
 }

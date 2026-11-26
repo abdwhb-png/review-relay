@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 requests = []
+checkpoint_reads = []
 
 
 class Model(BaseHTTPRequestHandler):
@@ -20,13 +21,23 @@ class Model(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.end_headers()
-        bash = next((tool for tool in payload.get('tools',[]) if tool.get('function',{}).get('name') == 'bash'),None)
-        if len(requests)==1 and bash:
-            properties=bash['function']['parameters']['properties']
-            arguments={key:value for key,value in {'command':'touch /tmp/reviewrelay-executed','description':'Fixture sandbox probe'}.items() if key in properties}
-            chunks=[({'role':'assistant','tool_calls':[{'index':0,'id':'call_sandbox','type':'function','function':{'name':'bash','arguments':json.dumps(arguments)}}]},None),({},'tool_calls')]
+        tools = {item['function']['name']: item['function'] for item in payload.get('tools', [])}
+        call = None
+        if len(requests) == 1 and 'bash' in tools:
+            call = ('bash', {'command': 'touch /tmp/reviewrelay-executed',
+                             'description': 'Fixture sandbox probe'})
+        elif checkpoint_reads and 'read' in tools:
+            path = checkpoint_reads.pop(0)
+            call = ('read', {'filePath': str(path), 'path': str(path), 'offset': 1, 'limit': 30})
+        if call:
+            name, values = call
+            properties = tools[name]['parameters']['properties']
+            arguments = {key: value for key, value in values.items() if key in properties}
+            tool_call = {'index': 0, 'id': f'call_fixture_{len(requests)}', 'type': 'function',
+                         'function': {'name': name, 'arguments': json.dumps(arguments)}}
+            chunks = [({'role': 'assistant', 'tool_calls': [tool_call]}, None), ({}, 'tool_calls')]
         else:
-            chunks=[({'role':'assistant','content':'Native review fixture'},None),({},'stop')]
+            chunks = [({'role': 'assistant', 'content': 'Native review fixture'}, None), ({}, 'stop')]
         for delta, finish in chunks:
             chunk = {'id': 'chatcmpl-fixture', 'object': 'chat.completion.chunk', 'created': 1,
                      'model': 'deepseek-v4.1-flash',
@@ -95,13 +106,39 @@ with tempfile.TemporaryDirectory(prefix='native-opencode-') as directory:
     next_env = environment('continued','fallback')
     imported = command(['session', 'import', '--standalone', str(archive), '--directory', str(project)], next_env)
     assert session in imported
-    continued = [json.loads(line) for line in command(['run', '--standalone', '--format', 'json', '--session', session, 'Continue with the follow-up'], next_env).splitlines() if line]
+    checkpoint_inputs = {
+        'reviewrelay-review.diff': '',
+        'reviewrelay-publication.diff': '+Publication coverage sentinel\n',
+        'reviewrelay-checkpoint.json': json.dumps({
+            'report': 'Prior report evidence sentinel',
+            'changedPaths': ['supporting/config.txt'],
+        }),
+    }
+    for name, content in checkpoint_inputs.items():
+        path = project / name
+        path.write_text(content)
+        checkpoint_reads.append(path)
+    continuation_prompt = Path('/output/continuation-prompt.txt').read_text()
+    continued = [json.loads(line) for line in command(
+        ['run', '--standalone', '--format', 'json', '--session', session, continuation_prompt],
+        next_env,
+    ).splitlines() if line]
     assert not any(event['type'] == 'error' for event in continued), continued
     assert next(event for event in continued if event['type'] == 'text')['sessionID'] == session
     continued_request = next(request for request in reversed(requests) if any(tool.get('function',{}).get('name') == 'read' for tool in request.get('tools',[])))
     assert continued_request['model'] == 'deepseek/deepseek-v4.1-flash-1017', continued_request['model']
     assert continued_request.get('reasoning',{}).get('effort') == 'high', 'The configured fallback reasoning level did not reach the model request'
     assert 'Native review fixture' in json.dumps(continued_request), 'continuation lost its earlier assistant response'
+    messages = continued_request['messages']
+    user_messages = json.dumps([message for message in messages if message['role'] == 'user'])
+    for requirement in ['complete publication scope', 'current snapshot', 'primary diff is empty',
+                        'retain still-valid findings', 'remove fixed or out-of-scope findings',
+                        'newly introduced defects', 'current head paths and line numbers']:
+        assert requirement in user_messages, f'Missing continuation instruction: {requirement}'
+    tool_results = json.dumps([message for message in messages if message['role'] == 'tool'])
+    for expected in [*checkpoint_inputs, 'Publication coverage sentinel', 'Prior report evidence sentinel']:
+        assert expected in tool_results, f'OpenCode did not read checkpoint input: {expected}'
+    assert not checkpoint_reads
     archive.write_text(command(['session', 'export', '--standalone', session], next_env))
     project_config['provider']['opencode-go']['models'] = {'deepseek-v4.1-flash': {'options': {'reasoningEffort': 'medium'}}}
     (project / 'opencode.jsonc').write_text('// Native project reasoning override\n' + json.dumps(project_config))

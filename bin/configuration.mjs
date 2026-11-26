@@ -7,6 +7,7 @@ const defaults = {
     reviewId: null,
     prAgentConfigPath: '.pr_agent.toml',
     autoReview: false,
+    analysisResumeMode: 'delta',
     includeAnalysisReport: true,
     includePipelineDetails: true,
     manualFallback: false,
@@ -192,6 +193,7 @@ export function loadConfiguration(env = process.env) {
     if (
         Object.keys(config).some((key) => !Object.hasOwn(defaults, key)) ||
         config.schemaVersion !== 1 ||
+        !['delta', 'full'].includes(config.analysisResumeMode) ||
         typeof config.autoReview !== 'boolean' ||
         typeof config.includeAnalysisReport !== 'boolean' ||
         typeof config.includePipelineDetails !== 'boolean' ||

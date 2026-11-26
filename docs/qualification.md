@@ -1,5 +1,40 @@
 # Release qualification
 
+## Version 1.5.0
+
+Release candidate `a5b5a453e9336dd3e5a7bd059ba8ef73c42e6ef8` passed [GitHub CI](https://github.com/abdwhb-png/review-relay/actions/runs/45830901294), including 76 infrastructure tests, source checks, actionlint, and the pinned OpenCode and PR-Agent fixtures.
+
+On the exact v1.5.0 runtime, both hosted interfaces verified byte-identical same-head report and session reuse after controlled synthesis failures, with no additional OpenCode invocation. The reusable workflow in `delta` mode and composed action in `full` mode both resumed unpublished C1 analysis on C2. Independent checks confirmed artifact checksums, native session continuation, publication coverage, and the exact review commit and native reference. Both descendant reports retained the persistent finding at its current location, removed the corrected finding from current defects, and found the new defect. Both excluded-only advances triggered consolidation and published on C2. The reusable workflow confirmed an empty inspection delta, and both reports removed the earlier mismatch after inspecting the changed supporting policy.
+
+One composed same-head synthesis attempt rejected the re-uploaded archive. The independently verified archive remained intact, and rerunning failed jobs completed synthesis and publication from that same archive.
+
+The [earlier qualification](#unpublished-analysis-resumption-candidate) records the paired measurements, stale-revision probes, publisher replays, and published-head skips before the release version change. The resumption implementation and native pins are identical across those candidates. Consumer source, raw artifacts, and run details remain private.
+
+## Unpublished analysis resumption candidate
+
+Candidate `7e85b6a777c6d3314f841a1092eaa22ee49c9b70` passed 74 infrastructure tests, the source and workflow checks, and the pinned-native fixtures. The OpenCode fixture verified retained session context, the consolidation instructions reaching the model transport, and tool reads of the empty primary diff, complete publication diff, and checkpoint evidence. The PR-Agent fixtures verified native scope, output and replay with a controlled GitHub transport.
+
+The deterministic operation tests cover same-head payload reuse, descendant checkpoint coverage and ordering, excluded-only changes, stale revisions, corrupted archives, and duplicate-publication recovery. Targeted mutations confirmed that the tests catch a missing prefix check, disabled checksum verification, missing publication deduplication and missing consolidation guidance.
+
+A private qualification consumer ran both the reusable workflow in `delta` mode and the composed action in `full` mode with real OpenCode Go inference. Both callers archived analysis before controlled synthesis authentication failures. At the same head, each new request reused the exact report and session payloads with the original producer identity and zero new OpenCode invocations. Each published review and native reference used the correct frozen commit and archive marker. Publisher-only replays retained the original review and reference IDs and bodies. Both subsequent requests on that published head skipped synthesis and publication.
+
+Both descendant runs imported their own stream's session and retained its earlier messages. The reusable path inspected the C1→C2 delta, and the composed path inspected the complete publication range. Independent Git reconstruction matched the archived diff digests, and new session messages accounted for the reported invocation tokens. Both resumed reports retained a still-valid finding at its new location, excluded the corrected finding from current defects, and identified the newly introduced defect at its current location. Fresh runs on the same frozen base and head, with the same scope and per-interface settings, found the same two C2 defects.
+
+| OpenCode analysis | Seconds | Input tokens | Output tokens | Reasoning tokens | Cache read tokens |
+| ----------------- | ------: | -----------: | ------------: | ---------------: | ----------------: |
+| Reusable, fresh   |   35.94 |        6,466 |         1,449 |            1,319 |            16,768 |
+| Reusable, delta   |   25.64 |        8,296 |         1,178 |              560 |            41,472 |
+| Composed, fresh   |   56.67 |        8,571 |         1,518 |            3,906 |            26,752 |
+| Composed, full    |   27.93 |        5,543 |         1,157 |              465 |            29,568 |
+
+Each row is one observed OpenCode invocation. Cache write counts were zero. These paired runs measure the seeded fixture. The reusable delta used more input and cache read tokens than its fresh baseline, despite the shorter observed duration.
+
+In the excluded-only runs, both OpenCode reports used the changed supporting context to remove the earlier mismatch from current findings. The reusable run archived the digest of an empty primary delta and still published on C2. Native PR-Agent synthesis independently flagged a remaining conditional policy-handling weakness. The native synthesis reports described the failure that would recur under a future policy change. Post-publication requests in both streams produced zero artifacts.
+
+Runner logs confirmed both interfaces used read-only PR access for analysis and synthesis and write access for publication. Publisher jobs received no model credentials.
+
+The controlled revision-advance probes rejected stale synthesis and publication after valid C1 analysis. The stale-synthesis PR recovered on C2 using its C1 checkpoint. Its first C2 synthesis attempt failed with an unspecified GitHub API error. Retrying failed jobs completed synthesis and publication from the same C2 analysis archive. Consumer source, raw reports, sessions, run logs and artifact evidence remain private.
+
 ## Version 1.4.0
 
 Runtime candidate `8a7421207f7d7dc646d3f4ebca2017501e0e8df9` passed hosted review-output qualification on 2026-11-26. Its [push CI](https://github.com/abdwhb-png/review-relay/actions/runs/45723350624) and [pull-request CI](https://github.com/abdwhb-png/review-relay/actions/runs/45723360902) passed source checks, actionlint, 61 infrastructure tests and seventeen pinned-native scenarios. Two additional infrastructure regressions bring the locally executed total to 63. Five temporary mutations were detected: missing report transfer, lost cache counters, broken report-size handling, coupled presentation controls and invalid artifact references. Native models, effort settings, dependency pins and generation/publication permissions are unchanged. Subsequent source changes contain documentation and regression tests only. The stable release contains this qualified runtime; release-only documentation changes do not alter engine compatibility.

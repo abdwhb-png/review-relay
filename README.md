@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.4.0:** native PR-Agent assessments, collapsible OpenCode reports and attributed pipeline measurements. See [qualification](docs/qualification.md#version-140) for executed checks and their boundaries.
+**Version 1.5.0:** recover completed unpublished OpenCode analysis on the same commit or a compatible descendant. See [qualification](docs/qualification.md#version-150) for executed checks and their boundaries.
 
 ## Agent skill
 
@@ -22,6 +22,7 @@ The workflow calls `$/action`, so its action and engine resolve to the same comm
 
 | Field                    | Default                   | Meaning                                                                                                                                               |
 | ------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `analysisResumeMode`     | `delta`                   | Per-stream OpenCode work on a descendant: focus on the checkpoint delta or reexamine the publication scope with `full`.                               |
 | `reviewId`               | `null`                    | Stable named stream identifier; null preserves the historical stream.                                                                                 |
 | `prAgentConfigPath`      | `.pr_agent.toml`          | Trusted native repository TOML replacing the root layer.                                                                                              |
 | `schemaVersion`          | `1`                       | Configuration contract version.                                                                                                                       |
@@ -49,7 +50,7 @@ Select a separate repository TOML with `prAgentConfigPath` (default `.pr_agent.t
 
 [The matrix caller](examples/multi-stream.yml) runs a complete workflow per stream in one run with `fail-fast: false`. Route automatic events and manual commands in the caller; a matrix's single output does not collect all publication URLs. Custom composed callers must pass each stream's own opaque request and artifact IDs, and use its authorization output `concurrency-group` for job concurrency. Generation and publication remain separate permission boundaries. Each caller must satisfy the [workflow trust boundary](#workflow-trust-boundary).
 
-All participating callers must use the lane-capable version. Opaque requests use format 2; manifests use format 3; configuration remains schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
+All participating callers must use the lane-capable version. Opaque requests use format 2, manifests use format 4, and configuration uses schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
 
 ## Caller-specific comment commands
 
@@ -101,7 +102,7 @@ Give both engines the intended review mission through trusted native instruction
 
 Compare equivalent fresh reviews or continuations on frozen revisions, separating setup and publication from model time. Use the existing stage logs and native session/report data; report finding quality alongside latency. Exclusions filter the primary diff while retaining supporting inspection context. Native effort and model choices remain independently configurable; no universal time, token or step ceiling is imposed.
 
-An engine upgrade changes exact archive compatibility and can require a complete first review. This corrective release preserves schema versions but does not relax those checks. Reports, sessions and performance evidence remain under consumer access controls.
+An engine upgrade changes exact archive compatibility and can require a complete first review. Reports, sessions and performance evidence remain under consumer access controls.
 
 ## Compose operations
 
@@ -142,7 +143,11 @@ Operations download artifacts by ID and verify GitHub producer metadata, consume
 
 The pinned [native incremental history](https://github.com/The-PR-Agent/pr-agent/blob/efdde4afe14aa401a3889012c7f3e9ef3081a430/pr_agent/git_providers/github_provider.py) uses commit timestamps relative to the previous review reference. A commit created before that reference can require a complete review when no matching archived context exists. Create qualification continuation commits after the preceding review completes; do not rewrite project history merely to force reuse.
 
-Use **Re-run failed jobs** on the same Actions run to reuse a completed analysis after synthesis failure. Changed revisions or analysis configuration require a new request. A new review request uses PR-Agent's native incremental boundary and imports a compatible archived native OpenCode session. No new changes invokes no model. Missing, expired, or incompatible history starts a complete review with an explicit summary; corrupt compatible context blocks. Artifacts from the pre-extraction implementation are not imported. Engine compatibility is conservative: changes to the recorded engine sources, native profiles, or runtime pins require fresh context.
+Use **Re-run failed jobs** on the same Actions run to reuse a completed analysis after synthesis failure. A new request on the same unpublished head can also reuse a verified report and session when the frozen inputs and publication coverage match. Its pipeline details identify the original producer and report that OpenCode did not run again. If a review already exists on the head, retry its original publisher to recover a missing native reference.
+
+A new request on a descendant can import the most advanced compatible completed session from the same caller workflow and stream, including from a failed run. PR-Agent still selects the native publication scope and synthesizes against its complete diff. The default `delta` focuses OpenCode on changes since the checkpoint and supplies the publication diff for consolidation. Set `analysisResumeMode: "full"` in trusted orchestration configuration or caller overrides to reexamine the publication scope with the imported session. Even an empty filtered delta triggers consolidation when the unpublished publication diff remains. The current snapshot and changed supporting files can affect earlier findings.
+
+Analysis artifact format 4 records publication coverage and the OpenCode inspection range separately. Missing, expired, or incompatible history and unproven coverage fall back to a complete review with an explicit summary. Corruption of the selected compatible archive fails the request. Earlier artifact formats are incompatible. Changes to the frozen base, relevant configuration, recorded engine sources, native profiles, or runtime pins can require fresh context. A PR advance requires a new authorization before synthesis or publication. Completed analysis on the earlier frozen revision remains eligible as a checkpoint.
 
 Publication verifies the live revision, writes the review on the frozen head, and checks again before adding the native history reference. A concurrent PR update can therefore fail a run after a correctly anchored review already exists. Retries reconcile hidden archive-bound markers before creating another review, reference, or suggestion. Partial publication remains a failure until its missing effects are confirmed; inference is not repeated to repair publication.
 
