@@ -1,5 +1,15 @@
 # Release qualification
 
+## Version 1.5.0
+
+Release candidate `a5b5a453e9336dd3e5a7bd059ba8ef73c42e6ef8` passed [GitHub CI](https://github.com/abdwhb-png/review-relay/actions/runs/45830901294), including 76 infrastructure tests, source checks, actionlint, and the pinned OpenCode and PR-Agent fixtures.
+
+On the exact v1.5.0 runtime, both hosted interfaces verified byte-identical same-head report and session reuse after controlled synthesis failures, with no additional OpenCode invocation. The reusable workflow in `delta` mode and composed action in `full` mode both resumed unpublished C1 analysis on C2. Independent checks confirmed artifact checksums, native session continuation, publication coverage, and the exact review commit and native reference. Both descendant reports retained the persistent finding at its current location, removed the corrected finding from current defects, and found the new defect. Both excluded-only advances triggered consolidation and published on C2. The reusable workflow confirmed an empty inspection delta, and both reports removed the earlier mismatch after inspecting the changed supporting policy.
+
+One composed same-head synthesis attempt rejected the re-uploaded archive. The independently verified archive remained intact, and rerunning failed jobs completed synthesis and publication from that same archive.
+
+The [earlier qualification](#unpublished-analysis-resumption-candidate) records the paired measurements, stale-revision probes, publisher replays, and published-head skips before the release version change. The resumption implementation and native pins are identical across those candidates. Consumer source, raw artifacts, and run details remain private.
+
 ## Unpublished analysis resumption candidate
 
 Candidate `7e85b6a777c6d3314f841a1092eaa22ee49c9b70` passed 74 infrastructure tests, the source and workflow checks, and the pinned-native fixtures. The OpenCode fixture verified retained session context, the consolidation instructions reaching the model transport, and tool reads of the empty primary diff, complete publication diff, and checkpoint evidence. The PR-Agent fixtures verified native scope, output and replay with a controlled GitHub transport.
