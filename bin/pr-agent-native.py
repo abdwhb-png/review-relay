@@ -172,7 +172,10 @@ if sys.argv[1] == 'generate':
                 anchor = add_pr_review_identity(
                     format_pr_review_header(incremental=self.incremental.is_incremental), identity, self.git_provider
                 )
-                Path('/output/rendered.json').write_text(json.dumps({'body': body, 'anchor': anchor}))
+                from pr_agent.algo.run_details import get_run_details
+                details = get_run_details()
+                models = list(details.models_used or ([details.model_used] if details.model_used else [])) if details else []
+                Path('/output/rendered.json').write_text(json.dumps({'body': body, 'anchor': anchor, 'models': models}))
 
         command2class['review'] = ArchivedPRReviewer
     from pr_agent.cli import run

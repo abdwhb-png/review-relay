@@ -58,6 +58,7 @@ for (const [fixture, operation, replay] of [
     ['adapter_fixture.py', 'repository-review-output', false],
     ['adapter_fixture.py', 'review-output', false],
     ['adapter_fixture.py', 'review-output-disabled', false],
+    ['adapter_fixture.py', 'review-assessment-disabled', false],
     ['adapter_fixture.py', 'publish-suggestions', false],
     ['adapter_fixture.py', 'publish-suggestions', true],
     ['adapter_fixture.py', 'publish-summarized', false],

@@ -3,7 +3,7 @@ name: review-relay
 description: Use when adopting, configuring, operating, upgrading, or troubleshooting ReviewRelay in a GitHub repository. Do not use for general code review or ReviewRelay engine development.
 license: Apache-2.0
 metadata:
-    version: '1.3.1'
+    version: '1.4.0'
 ---
 
 # ReviewRelay
@@ -48,7 +48,7 @@ Keep orchestration settings in ReviewRelay's supported project configuration and
 
 Select trusted instruction files or globs from the project, including its existing AGENTS.md, CLAUDE.md, custom guidance, or native instruction configuration. Verify that explicit sources exist at the trusted base revision. Do not assume every instruction convention is automatically discovered.
 
-Keep automatic review and provider fallback explicitly controlled. Enable manual draft review or additional target branches only when needed. Use native presentation settings for output such as Agent run details.
+Keep automatic review and provider fallback explicitly controlled. Enable manual draft review or additional target branches only when needed. Use native presentation settings for PR-Agent fields and Agent run details. The bundled profiles enable risk assessment, failure modes and priority files; preserve explicit project overrides. ReviewRelay enables `includeAnalysisReport` and `includePipelineDetails` by default; use orchestration settings to disable those additions. Read the selected version’s README review-output contract before interpreting counters or sharing the report.
 
 For multiple streams, preserve each stable reviewId and select its trusted native TOML with prAgentConfigPath when needed. Read the chosen version's multi-stream examples. Keep each authorized request and artifact ID attached to its stream; consume the returned concurrency-group rather than inventing names. In a matrix, use fail-fast: false and account for GitHub's output aggregation rules. A globally failed producer run does not by itself invalidate a completed stream's verified context.
 
@@ -84,13 +84,13 @@ Inspect the resulting diff and run the project's available focused workflow/conf
 
 Follow the user's existing authorization for publishing, merging and running workflows. Ensure workflows and configuration are active on the default or target base branch as required before qualification.
 
-For an authorized live check, use an eligible same-repository PR and request one review. Verify authorization, each required stage, the frozen head commit, publication, and consumer-owned report artifacts. Check Agent run details when enabled. Report missing credentials or unavailable live validation explicitly.
+For an authorized live check, use an eligible same-repository PR and request one review. Verify authorization, each required stage, the frozen head commit, publication, and consumer-owned report artifacts. Check native Agent run details when enabled, the collapsed OpenCode report, and pipeline measurements. Distinguish tests present from tests executed, current OpenCode counters from retained session history, and the publication cutoff from total completed workflow time. An excerpt links to the complete retained artifact; never treat missing metrics as zero or sum incompatible cache/token counters. Report missing credentials or unavailable live validation explicitly.
 
 ## 6. Operate and recover
 
 Use the caller's configured comment commands (default /review and /improve) from a user with current write, maintain or admin permission, or manual dispatch from the default branch with its PR-number input.
 
-After additional commits, request a new review to use native incremental review and compatible archived session continuation. A no-new-changes result should invoke no model.
+After additional commits, request a new review to use native incremental review and compatible archived session continuation. A no-new-changes result should invoke no model. When qualifying continuation, create the additional commits after the preceding review completes. If a review restarts with full context, inspect native commit timestamps and artifact compatibility using the selected version’s README recovery guidance; preserve the project’s history and verification gates.
 
 After synthesis failure, use GitHub's Re-run failed jobs on the same run to reuse completed analysis. If revisions or analysis configuration changed, start a new request.
 

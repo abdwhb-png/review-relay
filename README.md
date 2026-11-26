@@ -2,7 +2,7 @@
 
 ReviewRelay coordinates OpenCode analysis, native PR-Agent synthesis, and isolated GitHub publication. Use the supplied reusable workflow for the complete lifecycle or compose the same action's operations in your own workflow.
 
-**Version 1.3.1:** reduce redundant runtime preparation, scope probes, artifact metadata reads and fallback snapshot copies. Public interfaces and native profiles are unchanged. See [qualification](docs/qualification.md#version-131) for measured results and their boundaries.
+**Version 1.4.0 candidate:** native PR-Agent assessments, collapsible OpenCode reports and attributed pipeline measurements. See [candidate qualification](docs/qualification.md#version-140-candidate) for executed checks and their boundaries. A stable tag has not been published.
 
 ## Agent skill
 
@@ -20,18 +20,20 @@ The workflow calls `$/action`, so its action and engine resolve to the same comm
 
 `.reviewrelay.json` is optional. A custom `config-path` must exist at the trusted base revision. All fields below are optional; unknown fields and invalid types fail before inference.
 
-| Field                | Default                   | Meaning                                                                                                                                               |
-| -------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reviewId`           | `null`                    | Stable named stream identifier; null preserves the historical stream.                                                                                 |
-| `prAgentConfigPath`  | `.pr_agent.toml`          | Trusted native repository TOML replacing the root layer.                                                                                              |
-| `schemaVersion`      | `1`                       | Configuration contract version.                                                                                                                       |
-| `autoReview`         | `false`                   | Review opened, reopened, ready, and synchronized eligible PRs.                                                                                        |
-| `manualFallback`     | `false`                   | Permit the fallback route only on authorized manual requests after a classified provider failure.                                                     |
-| `manualDraftReview`  | `false`                   | Permit draft PRs for authorized `/review`, `/improve` and manual dispatch. Automatic requests still reject drafts.                                    |
-| `baseBranches`       | Repository default branch | Nonempty list of permitted target branch names.                                                                                                       |
-| `excludeGlobs`       | `[]`                      | Repository-relative Git globs excluded from the primary diff. `!` rules keep matches regardless of order. Excluded source remains supporting context. |
-| `retentionDays`      | `0`                       | Artifact retention; zero uses the consumer repository policy. GitHub enforces its retention bounds.                                                   |
-| `instructionSources` | `[]`                      | Repository-relative files or globs to supply as trusted instructions. Each configured source must match a regular tracked file.                       |
+| Field                    | Default                   | Meaning                                                                                                                                               |
+| ------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reviewId`               | `null`                    | Stable named stream identifier; null preserves the historical stream.                                                                                 |
+| `prAgentConfigPath`      | `.pr_agent.toml`          | Trusted native repository TOML replacing the root layer.                                                                                              |
+| `schemaVersion`          | `1`                       | Configuration contract version.                                                                                                                       |
+| `includeAnalysisReport`  | `true`                    | Append the verified final OpenCode report, collapsed by default.                                                                                      |
+| `includePipelineDetails` | `true`                    | Append OpenCode measurements and elapsed pipeline time; native PR-Agent statistics keep their own native control.                                     |
+| `autoReview`             | `false`                   | Review opened, reopened, ready, and synchronized eligible PRs.                                                                                        |
+| `manualFallback`         | `false`                   | Permit the fallback route only on authorized manual requests after a classified provider failure.                                                     |
+| `manualDraftReview`      | `false`                   | Permit draft PRs for authorized `/review`, `/improve` and manual dispatch. Automatic requests still reject drafts.                                    |
+| `baseBranches`           | Repository default branch | Nonempty list of permitted target branch names.                                                                                                       |
+| `excludeGlobs`           | `[]`                      | Repository-relative Git globs excluded from the primary diff. `!` rules keep matches regardless of order. Excluded source remains supporting context. |
+| `retentionDays`          | `0`                       | Artifact retention; zero uses the consumer repository policy. GitHub enforces its retention bounds.                                                   |
+| `instructionSources`     | `[]`                      | Repository-relative files or globs to supply as trusted instructions. Each configured source must match a regular tracked file.                       |
 
 Orchestration precedence is defaults, then the file at the frozen base, then the caller's `overrides` JSON object. Source selection is explicit: for example, `"instructionSources": ["CLAUDE.md", "policy/**/*.md"]`. Shared sources are supplied through native instruction/context settings without duplicate text injection; native engine-specific sources retain their own scope. No instruction filename or per-project skill inventory is required. Standard native discovery remains available; ReviewRelay does not assume automatic `CLAUDE.md` discovery in the pinned OpenCode runtime. Native OpenCode instruction globs also select trusted base files, including protection against new head files matching those globs.
 
@@ -47,7 +49,7 @@ Select a separate repository TOML with `prAgentConfigPath` (default `.pr_agent.t
 
 [The matrix caller](examples/multi-stream.yml) runs a complete workflow per stream in one run with `fail-fast: false`. Route automatic events and manual commands in the caller; a matrix's single output does not collect all publication URLs. Custom composed callers must pass each stream's own opaque request and artifact IDs, and use its authorization output `concurrency-group` for job concurrency. Generation and publication remain separate permission boundaries. Each caller must satisfy the [workflow trust boundary](#workflow-trust-boundary).
 
-All participating callers must use the lane-capable version. Opaque requests and manifests now use format 2; configuration remains schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
+All participating callers must use the lane-capable version. Opaque requests use format 2; manifests use format 3; configuration remains schema 1. Incompatible old artifacts are rejected or cause the documented fresh-context fallback during history discovery. Existing unscoped native review references remain recognized. Completed analysis can be reused even when another stream leaves the producer run globally failed.
 
 ## Caller-specific comment commands
 
@@ -116,6 +118,16 @@ An engine upgrade changes exact archive compatibility and can require a complete
 
 Treat `request` as an opaque value returned by authorization. It is bound to the original event, actor, run, caller workflow, frozen base/head, and configuration fingerprint. Manual permission is checked again before inference and publication. Advanced callers own orchestration, permissions, finalization, and concurrency; copy the example's per-PR serialization.
 
+## Review output
+
+The bundled primary and fallback TOML profiles enable native risk assessment, failure modes and priority files. Override these through native `pr_reviewer.require_risk_assessment`, `require_failure_modes` and `require_priority_files`; repository settings and invocation overrides retain their existing precedence. Custom host profiles replace bundled defaults as before. No merge recommendation is enabled by ReviewRelay.
+
+The review retains native PR-Agent Markdown, including `config.output_run_details` when enabled. ReviewRelay appends the final OpenCode report and pipeline details by default; disable either through `includeAnalysisReport` or `includePipelineDetails`. The reference issue comment keeps its native incremental anchor and stream identity without duplicating the report. Tests present in a diff do not imply tests were executed: inspection runs no PR code.
+
+OpenCode counters cover only the successful current attempt, excluding imported history and failed attempts; cached input is separate. Pass durations include retry waits within that operation. Elapsed pipeline time runs from GitHub run creation to publication preparation, including job queues and manual rerun waits, and is not the completed workflow duration. Missing measurements are marked unavailable. No cross-engine token total or unreported cost is inferred. Replaying publication preserves the existing review and its measured cutoff.
+
+The complete UTF-8 review must fit GitHub's 65,536-byte limit, including markers and details. Only the OpenCode report may be shortened, into an explicitly labeled escaped excerpt linking to the complete consumer-owned artifact. Native findings are never truncated; an oversized irreducible review fails before publication. The publication bundle carries the verified report across the isolated job boundary, not the native session or reasoning. Artifact links require consumer access and stop working after retention expiry. An upgrade requires fresh compatible context; old native references remain recognized.
+
 ## Workflow trust boundary
 
 Every job capable of uploading artifacts in a workflow run containing ReviewRelay must belong to the same trusted domain as the review jobs. Verify the complete caller, including reusable workflows, third-party actions, scripts and dependencies executed by its other jobs. Keep builds that execute reviewed head code or less trusted dependencies in a separate workflow. The supplied review workflow and composed examples execute trusted review tools and inspect PR source as data.
@@ -127,6 +139,8 @@ GitHub artifact metadata identifies the caller workflow and run. ReviewRelay ver
 Reports and native session exports stay in consumer Actions artifacts. They can contain source excerpts and complete conversations; artifact visibility follows that repository's GitHub access policy. The public tool repository receives none of this content. Explicit provider credential values are redacted before archival; no general source-code secret scanner is implied.
 
 Operations download artifacts by ID and verify GitHub producer metadata, consumer identity, schema, exact engine/runtime compatibility, effective configuration fingerprint, frozen revision, native scope, reconstructed diff, and payload checksums. Callers never handle OpenCode's internal session storage. Unknown formats and expired, corrupt, incompatible, or wrong-producer artifacts fail explicitly.
+
+The pinned [native incremental history](https://github.com/The-PR-Agent/pr-agent/blob/efdde4afe14aa401a3889012c7f3e9ef3081a430/pr_agent/git_providers/github_provider.py) uses commit timestamps relative to the previous review reference. A commit created before that reference can require a complete review when no matching archived context exists. Create qualification continuation commits after the preceding review completes; do not rewrite project history merely to force reuse.
 
 Use **Re-run failed jobs** on the same Actions run to reuse a completed analysis after synthesis failure. Changed revisions or analysis configuration require a new request. A new review request uses PR-Agent's native incremental boundary and imports a compatible archived native OpenCode session. No new changes invokes no model. Missing, expired, or incompatible history starts a complete review with an explicit summary; corrupt compatible context blocks. Artifacts from the pre-extraction implementation are not imported. Engine compatibility is conservative: changes to the recorded engine sources, native profiles, or runtime pins require fresh context.
 

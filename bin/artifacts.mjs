@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { api } from './github-actions.mjs';
 import { credentialName, nativeValue } from './configuration.mjs';
 
-export const artifactSchemaVersion = 2;
+export const artifactSchemaVersion = 3;
 
 export const runtime = JSON.parse(
     readFileSync(new URL('../runtime.json', import.meta.url), 'utf8'),
@@ -73,6 +73,7 @@ export function configurationDigest(config) {
 function compatibility() {
     const sources = [
         'pr-review.mjs',
+        'review-output.mjs',
         'configuration.mjs',
         'artifacts.mjs',
         'pr-agent-native.py',

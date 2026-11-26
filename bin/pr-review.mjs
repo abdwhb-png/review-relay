@@ -1,3 +1,4 @@
+import { composeReviewOutput } from './review-output.mjs';
 import { ensurePrAgentImage } from './install-runtime.mjs';
 import {
     runtime,
@@ -516,7 +517,13 @@ function restoreReport(path) {
             JSON.stringify(manifest.instructionPaths)
         )
             throw new Error('Shared instruction sources changed.');
-        return { ...prepared, report, scope: manifest.scope };
+        return {
+            ...prepared,
+            report,
+            scope: manifest.scope,
+            execution: manifest.execution,
+            producer: manifest.producer,
+        };
     } catch (error) {
         output({ state: 'new-review-required' });
         throw new Error(`The archived OpenCode report cannot be reused. ${newReviewRequired}`, {
@@ -1004,9 +1011,13 @@ function openCodeAttempt(provider, work, prepared) {
     if (transcript.info?.id !== currentSession || retained?.trim() !== redactReviewSecrets(report))
         throw new Error('Invalid OpenCode session export: review context was not retained.');
     const tokens = {};
+    const cache = {};
     for (const event of events.filter((entry) => entry.type === 'step_finish')) {
         for (const [type, amount] of Object.entries(event.part?.tokens ?? {})) {
             if (typeof amount === 'number') tokens[type] = (tokens[type] ?? 0) + amount;
+            if (type === 'cache' && amount && typeof amount === 'object')
+                for (const [key, count] of Object.entries(amount))
+                    if (typeof count === 'number') cache[key] = (cache[key] ?? 0) + count;
         }
     }
     return {
@@ -1015,7 +1026,19 @@ function openCodeAttempt(provider, work, prepared) {
         session,
         sessionId: currentSession,
         seconds: Math.round((Date.now() - start) / 1000),
-        tokens,
+        tokens: { ...tokens, ...(Object.keys(cache).length ? { cache } : {}) },
+        models: [
+            ...new Set(
+                transcript.messages
+                    .filter((message) =>
+                        events.some((event) => event.part?.messageID === message.id),
+                    )
+                    .map((message) =>
+                        message.model ? `${message.model.providerID}/${message.model.id}` : null,
+                    )
+                    .filter(Boolean),
+            ),
+        ],
     };
 }
 
@@ -1100,9 +1123,11 @@ function prAgentAttempt(provider, work, prepared, improve = false) {
         return { ok: false };
     const structured = JSON.parse(readFileSync(join(dir, 'review.json'), 'utf8'));
     const { review, usage, coverage } = structured;
-    const { body, anchor: nativeAnchor } = JSON.parse(
-        readFileSync(join(dir, 'rendered.json'), 'utf8'),
-    );
+    const {
+        body,
+        anchor: nativeAnchor,
+        models,
+    } = JSON.parse(readFileSync(join(dir, 'rendered.json'), 'utf8'));
     if (
         typeof body !== 'string' ||
         !body.trim() ||
@@ -1123,12 +1148,14 @@ function prAgentAttempt(provider, work, prepared, improve = false) {
         structured,
         seconds: Math.round((Date.now() - start) / 1000),
         tokens: usage,
+        models,
         coverage,
     };
 }
 
 async function reviewStage(name, run, waitForRetry) {
     const env = process.env;
+    const started = Date.now();
     const result = await runReviewStage(
         {
             manual: env.MANUAL === 'true',
@@ -1154,6 +1181,14 @@ async function reviewStage(name, run, waitForRetry) {
     summary(
         `${name} via ${result.provider}: ${result.seconds}s, tokens ${JSON.stringify(result.tokens ?? 'not reported')}${result.coverage ? `, coverage ${JSON.stringify(result.coverage)}` : ''}.`,
     );
+    result.execution = {
+        provider: result.provider,
+        models: result.models ?? [],
+        seconds: (Date.now() - started) / 1000,
+        tokens: result.tokens ?? null,
+        runId: env.GITHUB_RUN_ID,
+        attempt: env.GITHUB_RUN_ATTEMPT,
+    };
     return result;
 }
 
@@ -1221,6 +1256,7 @@ async function analyze() {
         scope,
         instructionPaths: settings().instructionPaths,
         sessionId: result.sessionId,
+        execution: result.execution,
         diffSha256: digest(diff),
     });
     output({ reports });
@@ -1228,9 +1264,8 @@ async function analyze() {
 
 async function synthesize() {
     assertRevision();
-    const { diff, excludedFiles, excludedPaths, report, scope } = restoreReport(
-        process.env.OPENCODE_REPORT_DIR,
-    );
+    const { diff, excludedFiles, excludedPaths, report, scope, execution, producer } =
+        restoreReport(process.env.OPENCODE_REPORT_DIR);
     const work = reviewDirectory();
     const input = join(work, 'input');
     mkdirSync(input);
@@ -1270,7 +1305,20 @@ async function synthesize() {
     );
     if (Buffer.byteLength(body) > 65536)
         throw new Error('The final review exceeds the GitHub publication limit.');
-    writeFileSync(join(reports, 'publication.json'), JSON.stringify({ anchor: result.anchor }));
+    writeFileSync(
+        join(reports, 'publication.json'),
+        redactReviewSecrets(
+            JSON.stringify({
+                anchor: result.anchor,
+                analysisReport: report,
+                analysisSource: {
+                    runId: producer.runId,
+                    artifactId: process.env.REVIEW_ARTIFACT_ID || null,
+                },
+                execution: { analysis: execution, synthesis: result.execution },
+            }),
+        ),
+    );
     writeManifest(reports, 'synthesis', settings(), { scope });
     output({ reports });
 }
@@ -1326,15 +1374,13 @@ function publish() {
     }
     if (kind !== 'synthesis') throw new Error('Expected a synthesis or suggestions artifact.');
     const body = readFileSync(join(directory, 'pr-agent-review.md'), 'utf8').trimEnd();
-    const { anchor } = JSON.parse(readFileSync(join(directory, 'publication.json'), 'utf8'));
+    const publication = JSON.parse(readFileSync(join(directory, 'publication.json'), 'utf8'));
+    const { anchor } = publication;
     if (typeof body !== 'string' || !body.trim() || Buffer.byteLength(body) > 65536)
         throw new Error('Invalid review for publication.');
     if (typeof anchor !== 'string' || !anchor.trim() || Buffer.byteLength(anchor) > 2048)
         throw new Error('Invalid native review anchor.');
     const marker = publicationMarker(directory);
-    const publishedBody = `${body}\n\n${marker}`;
-    if (Buffer.byteLength(publishedBody) > 65536)
-        throw new Error('The final review exceeds the GitHub publication limit.');
     const previous = api(`repos/${env.GITHUB_REPOSITORY}/pulls/${env.PR_NUMBER}/reviews`, [
         '--paginate',
         '--slurp',
@@ -1350,6 +1396,24 @@ function publish() {
         throw new Error(
             'Ambiguous publication history; reconcile duplicate reviews before retrying.',
         );
+    let publishedBody;
+    if (!previous.length) {
+        let createdAt;
+        if (settings().includePipelineDetails) {
+            try {
+                createdAt = api(
+                    `repos/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`,
+                ).created_at;
+            } catch {
+                console.warn('::warning::Pipeline elapsed time is unavailable from GitHub.');
+            }
+        }
+        publishedBody = composeReviewOutput(body, marker, publication, settings(), {
+            repository: env.GITHUB_REPOSITORY,
+            createdAt,
+            now: Date.now(),
+        });
+    }
     const result =
         previous[0] ??
         api(
