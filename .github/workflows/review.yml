@@ -20,6 +20,12 @@ on:
         outputs:
             publication-url:
                 value: ${{ jobs.publish.outputs.url }}
+env:
+    REVIEWRELAY_ANALYSIS_MODEL: ${{ vars.REVIEWRELAY_ANALYSIS_MODEL }}
+    REVIEWRELAY_ANALYSIS_EFFORT: ${{ vars.REVIEWRELAY_ANALYSIS_EFFORT }}
+    REVIEWRELAY_SYNTHESIS_EFFORT: ${{ vars.REVIEWRELAY_SYNTHESIS_EFFORT }}
+    REVIEWRELAY_OPENROUTER_FALLBACK_MODEL: ${{ vars.REVIEWRELAY_OPENROUTER_FALLBACK_MODEL }}
+    REVIEWRELAY_FALLBACK_ENABLED: ${{ vars.REVIEWRELAY_FALLBACK_ENABLED }}
 permissions: {}
 jobs:
     request:

@@ -72,7 +72,7 @@ Use composed operations only when the consumer needs custom orchestration. Start
 
 Reference the delivered workflow or action instead of copying ReviewRelay's engine scripts into the consumer. The action prepares its review runtimes; adopting it does not require application dependencies.
 
-Configure provider credentials through existing Actions secrets or another authorized secure channel. Adapt the example's native provider settings to the selected provider. Never request secrets in chat or commit their values.
+Configure provider credentials through existing Actions secrets or another authorized secure channel. Adapt the example's native provider settings to the selected provider. Never request secrets in chat or commit their values. For the reusable workflow, select the analysis model and reasoning effort through the `REVIEWRELAY_*` repository variables rather than assembling JSON; the workflow composes them with the credential secrets.
 
 Preserve read-only generation and a separate publisher without model credentials. Read instructions and configuration from trusted revisions, and never execute reviewed PR code.
 

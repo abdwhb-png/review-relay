@@ -10,7 +10,7 @@ Copy [skills/review-relay](skills/review-relay/SKILL.md) into your agent's proje
 
 ## Adopt the complete workflow
 
-Copy [the caller workflow](examples/workflow.yml), replace `REVIEWRELAY_SHA` with the reviewed ReviewRelay commit, and configure your provider credentials as Actions secrets. The caller needs `contents: read`, `actions: read`, `checks: write`, and `pull-requests: write`; the supplied workflow narrows permissions for each job. Enable access to this public action and reusable workflow in the consumer's Actions policy.
+Copy [the caller workflow](examples/workflow.yml), replace `REVIEWRELAY_SHA` with the reviewed ReviewRelay commit, and configure your provider credentials as Actions secrets (`OPENCODE_GO_API_KEY` for the primary Go provider and `OPENROUTER_API_KEY` for the fallback). Model and reasoning effort are repository variables (see [Model and reasoning effort](#model-and-reasoning-effort)); the reusable workflow composes them, so the consumer workflow only maps credential secrets into `provider-env` and contains no model or effort JSON. The caller needs `contents: read`, `actions: read`, `checks: write`, and `pull-requests: write`; the supplied workflow narrows permissions for each job. Enable access to this public action and reusable workflow in the consumer's Actions policy.
 
 The workflow accepts standalone `/review` and `/improve` comments from users with current write, maintain, or admin permission, and manual dispatch with a `pull_request` input from the default branch. Automatic review is off by default. Pull requests must be open, internal to the consumer repository, and target its default branch or an explicitly configured target. They must be ready by default; the orchestration settings below can explicitly permit manual draft reviews. Fork review is outside v1.
 
@@ -79,7 +79,24 @@ OpenCode receives the bundled profile as global defaults, the trusted project's 
 
 The pinned OpenCode 2.2.6 default-model resolver can omit a variant supplied through a global `model#variant` declaration. The bundled profiles and [native project example](examples/opencode.jsonc) therefore use native per-model settings for reasoning levels; tests verify the actual model request parameters. See the [pinned native resolver](https://github.com/anomalyco/opencode/blob/dc2ffcf8bf26f9e669b6aa22b95f50e12be15e06/packages/core/src/model-resolver.ts#L524). Model selection remains native and configurable.
 
-Pass credentials and native invocation overrides through the `provider-env` secret. Its `opencode` and `pr-agent` objects map native environment names to string values. An optional `fallback` object has the same two engine objects, isolating fallback credentials and overrides from the primary route. The default fallback profiles use OpenRouter. Runtime/launcher variables, GitHub identity, and publication controls are reserved. OpenAI-compatible transport receives a stable consumer/PR conversation header by default through the native `OPENAI_CUSTOM_HEADERS` setting; callers can replace it using that native environment variable.
+### Model and reasoning effort
+
+The reusable workflow reads repository variables to select the model and reasoning effort and composes them into the native provider environment over the credentials supplied in the `provider-env` secret. Consumer workflows contain no model or effort JSON. Omitted variables keep the bundled Go / DeepSeek V4.1 Flash / high behavior.
+
+| Variable                                | Default                             | Meaning                                         |
+| --------------------------------------- | ----------------------------------- | ----------------------------------------------- |
+| `REVIEWRELAY_ANALYSIS_MODEL`            | `deepseek-v4.1-flash`               | Primary OpenCode model under `opencode-go`.     |
+| `REVIEWRELAY_ANALYSIS_EFFORT`           | `high`                              | OpenCode reasoning effort for analysis.         |
+| `REVIEWRELAY_SYNTHESIS_EFFORT`          | `high`                              | PR-Agent reasoning effort for synthesis.        |
+| `REVIEWRELAY_OPENROUTER_FALLBACK_MODEL` | `deepseek/deepseek-v4.1-flash-1017` | OpenRouter fallback model for both engines.     |
+| `REVIEWRELAY_FALLBACK_ENABLED`          | unset                               | Enables the fallback route for manual requests. |
+| `REVIEWRELAY_EXCLUDE_GLOBS`             | `[]`                                | JSON globs excluded from the primary diff.      |
+
+`REVIEWRELAY_EXCLUDE_GLOBS` is applied through the caller's `overrides`; `REVIEWRELAY_FALLBACK_ENABLED` switches the fallback route. Change these in the consumer's repository variables, not the workflow file. Other native settings such as timeouts, budgets, presentation and instructions remain in the project's native OpenCode JSON/JSONC and PR-Agent TOML files.
+
+Pass credentials through the `provider-env` secret. Its `opencode` and `pr-agent` objects map native environment names to string values. An optional `fallback` object has the same two engine objects, isolating fallback credentials from the primary route. The reusable workflow adds the model and effort settings from the variables above over this secret; direct action callers pass the complete `provider-env` themselves. The default fallback profiles use OpenRouter. Runtime/launcher variables, GitHub identity, and publication controls are reserved. OpenAI-compatible transport receives a stable consumer/PR conversation header by default through the native `OPENAI_CUSTOM_HEADERS` setting; callers can replace it using that native environment variable.
+
+The caller supplies only credential keys in `provider-env`, for example:
 
 ```json
 {

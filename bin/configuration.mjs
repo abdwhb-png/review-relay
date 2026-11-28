@@ -170,8 +170,82 @@ print(json.dumps(model))
     return JSON.parse(checked.stdout);
 }
 
+export function composeProviderEnv(providerEnv, env = process.env) {
+    const analysisModel = env.REVIEWRELAY_ANALYSIS_MODEL || 'deepseek-v4.1-flash';
+    const analysisEffort = env.REVIEWRELAY_ANALYSIS_EFFORT || 'high';
+    const synthesisEffort = env.REVIEWRELAY_SYNTHESIS_EFFORT || 'high';
+    const fallbackModel =
+        env.REVIEWRELAY_OPENROUTER_FALLBACK_MODEL || 'deepseek/deepseek-v4.1-flash-1017';
+    const defaults = {
+        opencode: {
+            OPENCODE_CONFIG_CONTENT: JSON.stringify({
+                model: `opencode-go/${analysisModel}`,
+                provider: {
+                    'opencode-go': {
+                        models: {
+                            [analysisModel]: { options: { reasoningEffort: analysisEffort } },
+                        },
+                    },
+                },
+            }),
+        },
+        'pr-agent': { CONFIG__REASONING_EFFORT: synthesisEffort },
+        fallback: {
+            opencode: {
+                OPENCODE_CONFIG_CONTENT: JSON.stringify({
+                    model: `openrouter/${fallbackModel}`,
+                    provider: {
+                        openrouter: {
+                            models: {
+                                [fallbackModel]: {
+                                    options: { reasoning: { effort: analysisEffort } },
+                                },
+                            },
+                        },
+                    },
+                }),
+            },
+            'pr-agent': { CONFIG__MODEL: `openrouter/${fallbackModel}` },
+        },
+    };
+    const engines = JSON.parse(providerEnv || '{}');
+    for (const [engine, engineDefaults] of Object.entries(defaults)) {
+        if (engine === 'fallback') {
+            engines.fallback ??= {};
+            for (const [fallbackEngine, fallbackDefaults] of Object.entries(engineDefaults)) {
+                engines.fallback[fallbackEngine] = mergeNativeVariables(
+                    fallbackDefaults,
+                    engines.fallback[fallbackEngine],
+                );
+            }
+        } else {
+            engines[engine] = mergeNativeVariables(engineDefaults, engines[engine]);
+        }
+    }
+    return JSON.stringify(engines);
+}
+
+function mergeNativeVariables(defaults, overrides) {
+    const result = { ...defaults };
+    for (const [key, value] of Object.entries(overrides ?? {})) {
+        result[key] =
+            key === 'OPENCODE_CONFIG_CONTENT'
+                ? JSON.stringify(mergeConfig(JSON.parse(defaults[key]), JSON.parse(value)))
+                : value;
+    }
+    return result;
+}
+
+function mergeConfig(base, overlay) {
+    if (!base || typeof base !== 'object' || Array.isArray(base)) return overlay;
+    if (!overlay || typeof overlay !== 'object' || Array.isArray(overlay)) return overlay;
+    const result = { ...base };
+    for (const [key, value] of Object.entries(overlay)) result[key] = mergeConfig(base[key], value);
+    return result;
+}
+
 export function loadConfiguration(env = process.env) {
-    const providerEnv = nativeEnvironment(env.REVIEW_PROVIDER_ENV);
+    const providerEnv = nativeEnvironment(composeProviderEnv(env.REVIEW_PROVIDER_ENV, env));
     const ref = env.BASE_SHA || env.GITHUB_WORKFLOW_SHA;
     const files = trustedFiles(ref);
     const path = env.REVIEW_CONFIG_PATH || '.reviewrelay.json';
@@ -190,6 +264,8 @@ export function loadConfiguration(env = process.env) {
     } catch {
         throw new Error('Invalid ReviewRelay JSON configuration.');
     }
+    if (env.REVIEWRELAY_FALLBACK_ENABLED === 'true' || env.REVIEWRELAY_FALLBACK_ENABLED === 'false')
+        config.manualFallback = env.REVIEWRELAY_FALLBACK_ENABLED === 'true';
     if (
         Object.keys(config).some((key) => !Object.hasOwn(defaults, key)) ||
         config.schemaVersion !== 1 ||

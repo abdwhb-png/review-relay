@@ -2,7 +2,7 @@ import { composeReviewOutput } from '../../bin/review-output.mjs';
 import { runtime } from '../../bin/artifacts.mjs';
 import assert from 'node:assert/strict';
 import { pullRevision } from '../../bin/github-actions.mjs';
-import { commentCommands, credentialName } from '../../bin/configuration.mjs';
+import { commentCommands, composeProviderEnv, credentialName } from '../../bin/configuration.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -936,6 +936,100 @@ await test('the review workflow retains legacy filtering and prefilters custom c
     assert.equal(eligible('/unknown', custom), true);
 });
 
+await test('REVIEWRELAY variables compose native settings over provider-env credentials', () => {
+    const credentials = JSON.stringify({
+        opencode: { OPENCODE_API_KEY: 'primary-secret' },
+        'pr-agent': { OPENAI__KEY: 'primary-secret' },
+        fallback: {
+            opencode: { OPENROUTER_API_KEY: 'backup-secret' },
+            'pr-agent': { OPENROUTER__KEY: 'backup-secret' },
+        },
+    });
+    const defaults = JSON.parse(composeProviderEnv(credentials, {}));
+
+    assert.equal(defaults.opencode.OPENCODE_API_KEY, 'primary-secret');
+    assert.equal(defaults['pr-agent'].OPENAI__KEY, 'primary-secret');
+    assert.equal(defaults.fallback.opencode.OPENROUTER_API_KEY, 'backup-secret');
+    assert.equal(defaults.fallback['pr-agent'].OPENROUTER__KEY, 'backup-secret');
+    assert.deepEqual(JSON.parse(defaults.opencode.OPENCODE_CONFIG_CONTENT), {
+        model: 'opencode-go/deepseek-v4.1-flash',
+        provider: {
+            'opencode-go': {
+                models: { 'deepseek-v4.1-flash': { options: { reasoningEffort: 'high' } } },
+            },
+        },
+    });
+    assert.equal(defaults['pr-agent'].CONFIG__REASONING_EFFORT, 'high');
+    assert.deepEqual(JSON.parse(defaults.fallback.opencode.OPENCODE_CONFIG_CONTENT), {
+        model: 'openrouter/deepseek/deepseek-v4.1-flash-1017',
+        provider: {
+            openrouter: {
+                models: {
+                    'deepseek/deepseek-v4.1-flash-1017': {
+                        options: { reasoning: { effort: 'high' } },
+                    },
+                },
+            },
+        },
+    });
+    assert.equal(
+        defaults.fallback['pr-agent'].CONFIG__MODEL,
+        'openrouter/deepseek/deepseek-v4.1-flash-1017',
+    );
+
+    const custom = JSON.parse(
+        composeProviderEnv(credentials, {
+            REVIEWRELAY_ANALYSIS_MODEL: 'deepseek-v4.2-pro',
+            REVIEWRELAY_ANALYSIS_EFFORT: 'medium',
+            REVIEWRELAY_SYNTHESIS_EFFORT: 'low',
+            REVIEWRELAY_OPENROUTER_FALLBACK_MODEL: 'deepseek/deepseek-v4.2-pro',
+        }),
+    );
+    assert.equal(custom.opencode.OPENCODE_API_KEY, 'primary-secret');
+    assert.equal(custom['pr-agent'].CONFIG__REASONING_EFFORT, 'low');
+    assert.equal(
+        custom.fallback['pr-agent'].CONFIG__MODEL,
+        'openrouter/deepseek/deepseek-v4.2-pro',
+    );
+    const primary = JSON.parse(custom.opencode.OPENCODE_CONFIG_CONTENT);
+    assert.equal(primary.model, 'opencode-go/deepseek-v4.2-pro');
+    assert.equal(
+        primary.provider['opencode-go'].models['deepseek-v4.2-pro'].options.reasoningEffort,
+        'medium',
+    );
+    const fallback = JSON.parse(custom.fallback.opencode.OPENCODE_CONFIG_CONTENT);
+    assert.equal(fallback.model, 'openrouter/deepseek/deepseek-v4.2-pro');
+    assert.equal(
+        fallback.provider.openrouter.models['deepseek/deepseek-v4.2-pro'].options.reasoning.effort,
+        'medium',
+    );
+});
+
+await test('the reusable workflow keeps provider-env credentials and exposes REVIEWRELAY variables', () => {
+    const workflow = readFileSync(
+        new URL('../../.github/workflows/review.yml', import.meta.url),
+        'utf8',
+    );
+    const secrets = workflow.match(/\n\s+secrets:\n([\s\S]*?)\n\s+outputs:/)?.[1] ?? '';
+    assert.match(secrets, /provider-env:/);
+    assert.doesNotMatch(secrets, /opencode-go-key|openrouter-key/);
+    const generation = [
+        ...workflow.matchAll(
+            /provider-env:\s*\$\{\{\s*secrets\.provider-env\s*\|\|\s*'\{\}'\s*\}\}/g,
+        ),
+    ];
+    assert.equal(generation.length, 4);
+    for (const name of [
+        'REVIEWRELAY_ANALYSIS_MODEL',
+        'REVIEWRELAY_ANALYSIS_EFFORT',
+        'REVIEWRELAY_SYNTHESIS_EFFORT',
+        'REVIEWRELAY_OPENROUTER_FALLBACK_MODEL',
+        'REVIEWRELAY_FALLBACK_ENABLED',
+    ])
+        assert.match(workflow, new RegExp(`${name}:`));
+    assert.match(workflow, /overrides:\n\s+type: string\n\s+default: '\{\}'/);
+});
+
 await test('a differently laid out project uses trusted custom guidance and its configured target branch', (t) => {
     const { run, read } = reviewFixture(t, {
         branch: 'develop',
@@ -1459,6 +1553,26 @@ await test('manual fallback instruction sources are frozen before primary analys
         !JSON.parse(read('opencode-inline-config')).instructions.includes('fallback.md'),
         'fallback-only rules must not be injected into primary inference',
     );
+});
+
+await test('REVIEWRELAY_FALLBACK_ENABLED activates manual fallback without a caller override', (t) => {
+    const { run, read } = reviewFixture(t, {
+        files: { 'fallback.md': 'Trusted fallback policy' },
+        headFiles: { 'fallback.md': 'Injected fallback policy' },
+    });
+    const result = run('analyze', {
+        MANUAL: 'true',
+        REVIEWRELAY_FALLBACK_ENABLED: 'true',
+        REVIEW_PROVIDER_ENV: JSON.stringify({
+            fallback: {
+                opencode: {
+                    OPENCODE_CONFIG_CONTENT: JSON.stringify({ instructions: ['fallback.md'] }),
+                },
+            },
+        }),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(read('snapshot'))['fallback.md'], 'Trusted fallback policy');
 });
 
 await test('native TOML safety constraints follow native case-insensitive settings names', (t) => {
