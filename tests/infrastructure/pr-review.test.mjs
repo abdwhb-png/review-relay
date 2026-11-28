@@ -2,7 +2,11 @@ import { composeReviewOutput } from '../../bin/review-output.mjs';
 import { runtime } from '../../bin/artifacts.mjs';
 import assert from 'node:assert/strict';
 import { pullRevision } from '../../bin/github-actions.mjs';
-import { commentCommands, composeProviderEnv, credentialName } from '../../bin/configuration.mjs';
+import {
+    commentCommands,
+    composeNativeSettings,
+    credentialName,
+} from '../../bin/configuration.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -936,60 +940,44 @@ await test('the review workflow retains legacy filtering and prefilters custom c
     assert.equal(eligible('/unknown', custom), true);
 });
 
-await test('REVIEWRELAY variables compose native settings over provider-env credentials', () => {
-    const credentials = JSON.stringify({
+function nativeCredentials() {
+    return {
         opencode: { OPENCODE_API_KEY: 'primary-secret' },
         'pr-agent': { OPENAI__KEY: 'primary-secret' },
         fallback: {
             opencode: { OPENROUTER_API_KEY: 'backup-secret' },
             'pr-agent': { OPENROUTER__KEY: 'backup-secret' },
         },
-    });
-    const defaults = JSON.parse(composeProviderEnv(credentials, {}));
+    };
+}
 
-    assert.equal(defaults.opencode.OPENCODE_API_KEY, 'primary-secret');
-    assert.equal(defaults['pr-agent'].OPENAI__KEY, 'primary-secret');
-    assert.equal(defaults.fallback.opencode.OPENROUTER_API_KEY, 'backup-secret');
-    assert.equal(defaults.fallback['pr-agent'].OPENROUTER__KEY, 'backup-secret');
-    assert.deepEqual(JSON.parse(defaults.opencode.OPENCODE_CONFIG_CONTENT), {
-        model: 'opencode-go/deepseek-v4.1-flash',
-        provider: {
-            'opencode-go': {
-                models: { 'deepseek-v4.1-flash': { options: { reasoningEffort: 'high' } } },
-            },
-        },
-    });
-    assert.equal(defaults['pr-agent'].CONFIG__REASONING_EFFORT, 'high');
-    assert.deepEqual(JSON.parse(defaults.fallback.opencode.OPENCODE_CONFIG_CONTENT), {
-        model: 'openrouter/deepseek/deepseek-v4.1-flash-1017',
-        provider: {
-            openrouter: {
-                models: {
-                    'deepseek/deepseek-v4.1-flash-1017': {
-                        options: { reasoning: { effort: 'high' } },
-                    },
-                },
-            },
-        },
-    });
-    assert.equal(
-        defaults.fallback['pr-agent'].CONFIG__MODEL,
-        'openrouter/deepseek/deepseek-v4.1-flash-1017',
-    );
+await test('no REVIEWRELAY variable leaves provider-env untouched', () => {
+    const credentials = nativeCredentials();
+    const composed = composeNativeSettings(credentials, {});
+    assert.deepEqual(composed, credentials);
+    assert.equal(Object.hasOwn(composed.opencode, 'OPENCODE_CONFIG_CONTENT'), false);
+    assert.equal(Object.hasOwn(composed['pr-agent'], 'CONFIG__REASONING_EFFORT'), false);
+    assert.equal(Object.hasOwn(composed.fallback.opencode, 'OPENCODE_CONFIG_CONTENT'), false);
+    assert.equal(Object.hasOwn(composed.fallback['pr-agent'], 'CONFIG__MODEL'), false);
+});
 
-    const custom = JSON.parse(
-        composeProviderEnv(credentials, {
-            REVIEWRELAY_ANALYSIS_MODEL: 'deepseek-v4.2-pro',
-            REVIEWRELAY_ANALYSIS_EFFORT: 'medium',
-            REVIEWRELAY_SYNTHESIS_EFFORT: 'low',
-            REVIEWRELAY_OPENROUTER_FALLBACK_MODEL: 'deepseek/deepseek-v4.2-pro',
-        }),
-    );
+await test('REVIEWRELAY variables add only configured settings and provider-env keeps priority', () => {
+    const custom = composeNativeSettings(nativeCredentials(), {
+        REVIEWRELAY_ANALYSIS_MODEL: 'deepseek-v4.2-pro',
+        REVIEWRELAY_ANALYSIS_EFFORT: 'medium',
+        REVIEWRELAY_SYNTHESIS_EFFORT: 'low',
+        REVIEWRELAY_OPENROUTER_FALLBACK_MODEL: 'deepseek/deepseek-v4.2-pro',
+    });
     assert.equal(custom.opencode.OPENCODE_API_KEY, 'primary-secret');
     assert.equal(custom['pr-agent'].CONFIG__REASONING_EFFORT, 'low');
+    assert.equal(custom.fallback['pr-agent'].CONFIG__REASONING_EFFORT, 'low');
     assert.equal(
         custom.fallback['pr-agent'].CONFIG__MODEL,
         'openrouter/deepseek/deepseek-v4.2-pro',
+    );
+    assert.deepEqual(
+        JSON.parse(custom.fallback['pr-agent'].CONFIG__ADDITIONAL_REASONING_EFFORT_MODELS),
+        ['deepseek/deepseek-v4.2-pro'],
     );
     const primary = JSON.parse(custom.opencode.OPENCODE_CONFIG_CONTENT);
     assert.equal(primary.model, 'opencode-go/deepseek-v4.2-pro');
@@ -1003,6 +991,51 @@ await test('REVIEWRELAY variables compose native settings over provider-env cred
         fallback.provider.openrouter.models['deepseek/deepseek-v4.2-pro'].options.reasoning.effort,
         'medium',
     );
+
+    const caller = nativeCredentials();
+    caller.opencode.OPENCODE_CONFIG_CONTENT = JSON.stringify({ model: 'caller/model' });
+    const merged = composeNativeSettings(caller, {
+        REVIEWRELAY_ANALYSIS_MODEL: 'variable/model',
+    });
+    assert.equal(JSON.parse(merged.opencode.OPENCODE_CONFIG_CONTENT).model, 'caller/model');
+});
+
+await test('REVIEWRELAY variables reach the native invocation', (t) => {
+    const { run, read } = reviewFixture(t);
+    const result = run('analyze', {
+        REVIEWRELAY_ANALYSIS_MODEL: 'deepseek-v4.2-pro',
+        REVIEWRELAY_ANALYSIS_EFFORT: 'medium',
+        REVIEWRELAY_SYNTHESIS_EFFORT: 'low',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const config = JSON.parse(read('opencode-inline-config'));
+    assert.equal(config.model, 'opencode-go/deepseek-v4.2-pro');
+    assert.equal(
+        config.provider['opencode-go'].models['deepseek-v4.2-pro'].options.reasoningEffort,
+        'medium',
+    );
+});
+
+await test('without REVIEWRELAY variables the project config owns model selection', (t) => {
+    const { run, read } = reviewFixture(t, {
+        files: { 'opencode.json': JSON.stringify({ model: 'vendor/project-model' }) },
+    });
+    const result = run('analyze');
+    assert.equal(result.status, 0, result.stderr);
+    const config = JSON.parse(read('opencode-inline-config'));
+    assert.equal(Object.hasOwn(config, 'model'), false);
+    assert.equal(Object.hasOwn(config, 'provider'), false);
+    assert.ok(!read('opencode-arguments').includes('--model'));
+});
+
+await test('a malformed provider-env keeps the guarded error and never echoes its content', (t) => {
+    const { run } = reviewFixture(t);
+    const result = run('analyze', {
+        REVIEW_PROVIDER_ENV: '{"opencode":{"OPENCODE_API_KEY": sk-live-12345}}',
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Invalid provider-env JSON/);
+    assert.doesNotMatch(result.stderr, /sk-live-12345/);
 });
 
 await test('the reusable workflow keeps provider-env credentials and exposes REVIEWRELAY variables', () => {
