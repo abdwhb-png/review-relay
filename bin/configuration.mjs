@@ -170,8 +170,98 @@ print(json.dumps(model))
     return JSON.parse(checked.stdout);
 }
 
+export function composeNativeSettings(providerEnv, env = process.env) {
+    const analysisModel = env.REVIEWRELAY_ANALYSIS_MODEL;
+    const analysisEffort = env.REVIEWRELAY_ANALYSIS_EFFORT;
+    const synthesisEffort = env.REVIEWRELAY_SYNTHESIS_EFFORT;
+    const fallbackModel = env.REVIEWRELAY_OPENROUTER_FALLBACK_MODEL;
+    const additions = {};
+    const add = (engine, key, value) => {
+        additions[engine] ??= {};
+        additions[engine][key] = value;
+    };
+    const addFallback = (engine, key, value) => {
+        additions.fallback ??= {};
+        additions.fallback[engine] ??= {};
+        additions.fallback[engine][key] = value;
+    };
+
+    if (analysisModel || analysisEffort) {
+        const modelId = analysisModel || openCodeDefaults().model.split('/')[1];
+        const config = {};
+        if (analysisModel) config.model = `opencode-go/${analysisModel}`;
+        if (analysisEffort)
+            config.provider = {
+                'opencode-go': {
+                    models: { [modelId]: { options: { reasoningEffort: analysisEffort } } },
+                },
+            };
+        add('opencode', 'OPENCODE_CONFIG_CONTENT', JSON.stringify(config));
+    }
+    if (analysisEffort || fallbackModel) {
+        const modelId = fallbackModel || openCodeDefaults('fallback').model.split('/').at(-1);
+        const config = {};
+        if (fallbackModel) config.model = `openrouter/${fallbackModel}`;
+        if (analysisEffort)
+            config.provider = {
+                openrouter: {
+                    models: { [modelId]: { options: { reasoning: { effort: analysisEffort } } } },
+                },
+            };
+        addFallback('opencode', 'OPENCODE_CONFIG_CONTENT', JSON.stringify(config));
+    }
+    if (synthesisEffort) {
+        add('pr-agent', 'CONFIG__REASONING_EFFORT', synthesisEffort);
+        addFallback('pr-agent', 'CONFIG__REASONING_EFFORT', synthesisEffort);
+    }
+    if (fallbackModel) {
+        addFallback('pr-agent', 'CONFIG__MODEL', `openrouter/${fallbackModel}`);
+        addFallback(
+            'pr-agent',
+            'CONFIG__ADDITIONAL_REASONING_EFFORT_MODELS',
+            JSON.stringify([fallbackModel]),
+        );
+    }
+
+    const result = structuredClone(providerEnv);
+    for (const [engine, values] of Object.entries(additions)) {
+        result[engine] ??= {};
+        if (engine === 'fallback') {
+            for (const [fallbackEngine, fallbackValues] of Object.entries(values))
+                result.fallback[fallbackEngine] = mergeNativeVariables(
+                    fallbackValues,
+                    result.fallback[fallbackEngine],
+                );
+        } else {
+            result[engine] = mergeNativeVariables(values, result[engine]);
+        }
+    }
+    return result;
+}
+
+function mergeNativeVariables(additions, overrides) {
+    const result = { ...additions };
+    for (const [key, value] of Object.entries(overrides ?? {})) {
+        result[key] =
+            key === 'OPENCODE_CONFIG_CONTENT' && additions[key] && value
+                ? JSON.stringify(mergeConfig(JSON.parse(additions[key]), JSON.parse(value)))
+                : value;
+    }
+    return result;
+}
+
+function mergeConfig(base, overlay) {
+    if (!base || typeof base !== 'object' || Array.isArray(base)) return overlay;
+    if (!overlay || typeof overlay !== 'object' || Array.isArray(overlay)) return overlay;
+    const result = { ...base };
+    for (const [key, value] of Object.entries(overlay)) result[key] = mergeConfig(base[key], value);
+    return result;
+}
+
 export function loadConfiguration(env = process.env) {
-    const providerEnv = nativeEnvironment(env.REVIEW_PROVIDER_ENV);
+    const validated = nativeEnvironment(env.REVIEW_PROVIDER_ENV);
+    const composed = composeNativeSettings(validated, env);
+    const providerEnv = nativeEnvironment(JSON.stringify(composed));
     const ref = env.BASE_SHA || env.GITHUB_WORKFLOW_SHA;
     const files = trustedFiles(ref);
     const path = env.REVIEW_CONFIG_PATH || '.reviewrelay.json';
@@ -190,6 +280,8 @@ export function loadConfiguration(env = process.env) {
     } catch {
         throw new Error('Invalid ReviewRelay JSON configuration.');
     }
+    if (env.REVIEWRELAY_FALLBACK_ENABLED === 'true' || env.REVIEWRELAY_FALLBACK_ENABLED === 'false')
+        config.manualFallback = env.REVIEWRELAY_FALLBACK_ENABLED === 'true';
     if (
         Object.keys(config).some((key) => !Object.hasOwn(defaults, key)) ||
         config.schemaVersion !== 1 ||

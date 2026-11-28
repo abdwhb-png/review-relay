@@ -19,6 +19,9 @@ jobs:
             checks: write
             pull-requests: write
         uses: abdwhb-png/review-relay/.github/workflows/review.yml@REVIEWRELAY_SHA
+        with:
+            overrides: >-
+                {"excludeGlobs":${{ vars.REVIEWRELAY_EXCLUDE_GLOBS || '[]' }}}
         secrets:
             provider-env: |
                 {
